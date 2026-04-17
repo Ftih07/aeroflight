@@ -21,6 +21,10 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
+
+        $middleware->alias([
+            'password.confirm' => \App\Http\Middleware\SmartPasswordConfirm::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
