@@ -11,11 +11,19 @@ class Booking extends Model
     protected $fillable = [
         'user_id',
         'flight_id',
+        'parent_booking_id', // Baru (Untuk Reschedule)
         'pnr_code',
+        'provider_pnr', // Baru
         'total_amount_usd',
         'status',
         'stripe_payment_id'
     ];
+
+    // Relasi ke booking lama jika ini adalah tiket hasil reschedule
+    public function parentBooking()
+    {
+        return $this->belongsTo(Booking::class, 'parent_booking_id');
+    }
 
     public function user()
     {
@@ -40,13 +48,9 @@ class Booking extends Model
     protected static function booted()
     {
         static::updated(function ($booking) {
-            // Cek apakah kolom 'status' barusan diubah?
             if ($booking->wasChanged('status')) {
-                // Jangan kirim email kalau statusnya pending (baru dibuat)
                 if ($booking->status !== 'pending') {
-                    // Ambil email user (pastikan relasi public function user() ada di model ini)
-                    $email = $booking->user->email ?? 'naufal@test.com'; // Fallback
-
+                    $email = $booking->user->email ?? 'naufal@test.com';
                     Mail::to($email)->send(new BookingStatusUpdated($booking));
                 }
             }

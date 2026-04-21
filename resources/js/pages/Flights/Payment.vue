@@ -1,40 +1,55 @@
-<script setup lang="ts">
+<!-- eslint-disable vue/block-lang -->
+<script setup>
 import { Head } from '@inertiajs/vue3';
 import { loadStripe } from '@stripe/stripe-js';
 import { ref, onMounted } from 'vue';
 import { Button } from '@/components/ui/button';
 import AeroLayout from '@/layouts/AeroLayout.vue';
 
-defineOptions({
-    // @ts-expect-error - Inertia layout typing not recognized
-    layout: null,
+defineOptions({ layout: null });
+
+const props = defineProps({
+    flight: Object,
+    booking: Object,
+    clientSecret: String,
+    stripeKey: String,
 });
 
-const props = defineProps<{
-    flight: any;
-    booking: any;
-    clientSecret: string;
-    stripeKey: string;
-}>();
-
-const stripeElementRef = ref<HTMLElement | null>(null);
+const stripeElementRef = ref(null);
 const isProcessing = ref(false);
 const errorMessage = ref('');
-let stripe: any = null;
-let elements: any = null;
+let stripe = null;
+let elements = null;
+
+// --- HELPER WAKTU & DURASI ---
+const formatTime = (dateString) =>
+    new Date(dateString).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+const calculateDuration = (departure, arrival) => {
+    const diffMs = new Date(arrival) - new Date(departure);
+    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    return diffHrs === 0 ? `${diffMins}m` : `${diffHrs}h ${diffMins}m`;
+};
+const displayFlightNumber = (airlineCode, flightNumber) => {
+    const code = String(airlineCode || '').toUpperCase();
+    const num = String(flightNumber || '').toUpperCase();
+
+    return num.includes(code) || num.includes('-') ? num : `${code}-${num}`;
+};
 
 onMounted(async () => {
-    // Inisialisasi Stripe JS
     stripe = await loadStripe(props.stripeKey);
 
-    // KUSTOMISASI DESAIN STRIPE AGAR MATCH DENGAN AEROFLIGHT
-    // Kita gunakan mode transparan agar mewarisi warna dari container bg-card kita
     const appearance = {
         theme: 'none',
         variables: {
             fontFamily: 'ui-sans-serif, system-ui, sans-serif',
             colorBackground: 'transparent',
-            colorText: 'currentColor', // Ikut warna teks AeroFlight
+            colorText: 'currentColor',
             colorDanger: '#ef4444',
             borderRadius: '8px',
             spacingUnit: '4px',
@@ -42,24 +57,23 @@ onMounted(async () => {
         },
         rules: {
             '.Input': {
-                border: '1px solid #e5e7eb', // border-border light
+                border: '1px solid #e5e7eb',
                 backgroundColor: 'transparent',
                 padding: '12px 16px',
                 fontSize: '14px',
                 transition: 'border-color 0.15s, box-shadow 0.15s',
             },
             '.Input:focus': {
-                borderColor: '#3b82f6', // primary biru
+                borderColor: '#3b82f6',
                 boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.15)',
                 outline: 'none',
             },
             '.Label': {
                 fontWeight: '500',
                 fontSize: '14px',
-                color: '#6b7280', // text-muted
+                color: '#6b7280',
                 marginBottom: '6px',
             },
-            // Deteksi Dark Mode (Kalau kamu punya toggle dark mode)
             '.Input--invalid': {
                 borderColor: '#ef4444',
                 color: '#ef4444',
@@ -73,7 +87,7 @@ onMounted(async () => {
     });
 
     const paymentElement = elements.create('payment', {
-        layout: 'tabs', // Layout modern dari Stripe (mirip accordion)
+        layout: 'tabs',
     });
 
     if (stripeElementRef.value) {
@@ -92,12 +106,10 @@ const submitPayment = async () => {
     const { error } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-            // Redirect otomatis ke route success kita jika berhasil
             return_url: window.location.origin + '/checkout/success',
         },
     });
 
-    // Kalau sampai baris ini, berarti ada error validasi kartu (ex: saldo kurang, nomor salah)
     if (error) {
         errorMessage.value = error.message;
         isProcessing.value = false;
@@ -110,7 +122,7 @@ const submitPayment = async () => {
 
     <AeroLayout>
         <main
-            class="mx-auto min-h-[80vh] max-w-5xl px-4 pt-24 pb-12 sm:px-6 lg:px-8"
+            class="mx-auto min-h-[80vh] max-w-5xl px-4 pt-24 pb-12 sm:px-6 md:flex-row lg:px-8"
         >
             <div class="flex flex-col gap-8 md:flex-row">
                 <div class="flex-1 space-y-6">
@@ -145,49 +157,133 @@ const submitPayment = async () => {
                 </div>
 
                 <div
-                    class="sticky top-24 h-fit w-full rounded-xl border border-border bg-card p-6 shadow-sm md:w-80"
+                    class="sticky top-24 h-fit w-full rounded-2xl border border-border bg-card p-6 shadow-sm md:w-96"
                 >
-                    <h3 class="mb-4 text-lg font-bold text-foreground">
-                        Booking Summary
+                    <h3 class="mb-5 text-lg font-bold text-foreground">
+                        Order Summary
                     </h3>
 
                     <div
-                        class="mb-4 flex flex-col gap-2 border-b border-border pb-4 text-sm text-muted-foreground"
+                        class="mb-6 rounded-xl border border-border bg-muted/20 p-4"
                     >
-                        <div class="flex justify-between">
-                            <span>Booking ID</span>
+                        <div class="mb-3 text-center">
                             <span
-                                class="font-mono font-semibold text-foreground"
+                                class="inline-block rounded-md bg-primary/10 px-3 py-1 text-xs font-bold tracking-widest text-primary uppercase"
+                            >
+                                {{ flight.airline_name || flight.airline_code }}
+                            </span>
+                        </div>
+
+                        <div class="mb-4 flex items-center justify-between">
+                            <div class="text-left">
+                                <span
+                                    class="block text-lg font-black text-foreground"
+                                    >{{ flight.origin_airport }}</span
+                                >
+                                <span
+                                    class="text-xs font-semibold text-muted-foreground"
+                                    >{{ formatTime(flight.departure_at) }}</span
+                                >
+                            </div>
+
+                            <div class="flex flex-col items-center px-2">
+                                <span
+                                    class="mb-1 text-[10px] font-bold text-muted-foreground"
+                                >
+                                    {{
+                                        calculateDuration(
+                                            flight.departure_at,
+                                            flight.arrival_at,
+                                        )
+                                    }}
+                                </span>
+                                <div
+                                    class="relative flex w-full items-center justify-center"
+                                >
+                                    <div class="h-[2px] w-12 bg-border"></div>
+                                    <svg
+                                        class="absolute h-4 w-4 bg-transparent text-muted-foreground"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M14 5l7 7m0 0l-7 7m7-7H3"
+                                        />
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <div class="text-right">
+                                <span
+                                    class="block text-lg font-black text-foreground"
+                                    >{{ flight.destination_airport }}</span
+                                >
+                                <span
+                                    class="text-xs font-semibold text-muted-foreground"
+                                    >{{ formatTime(flight.arrival_at) }}</span
+                                >
+                            </div>
+                        </div>
+
+                        <div
+                            class="flex items-center justify-between border-t border-border/50 pt-3 text-xs"
+                        >
+                            <span class="text-muted-foreground"
+                                >Flight No.</span
+                            >
+                            <span class="font-mono font-bold text-foreground">{{
+                                displayFlightNumber(
+                                    flight.airline_code,
+                                    flight.flight_number,
+                                )
+                            }}</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="mb-6 flex flex-col gap-3 border-b border-border pb-5 text-sm"
+                    >
+                        <div class="flex items-center justify-between">
+                            <span class="text-muted-foreground"
+                                >Booking ID</span
+                            >
+                            <span
+                                class="rounded bg-muted px-2 py-0.5 font-mono font-bold text-foreground"
                             >
                                 #{{ String(booking.id).padStart(5, '0') }}
                             </span>
                         </div>
-                        <div class="flex justify-between">
-                            <span>Flight</span>
+                        <div class="flex items-center justify-between">
+                            <span class="text-muted-foreground"
+                                >Passengers</span
+                            >
                             <span class="font-semibold text-foreground">
-                                {{ flight.flight_number }}
-                            </span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span>Passengers</span>
-                            <span class="text-foreground">
                                 {{ booking.passengers.length }} Person(s)
                             </span>
                         </div>
                     </div>
 
                     <div class="mb-6 flex items-end justify-between">
-                        <span class="font-medium text-muted-foreground"
+                        <span class="font-bold text-muted-foreground"
                             >Total to Pay</span
                         >
-                        <span class="text-3xl font-bold text-primary">
-                            ${{ booking.total_amount_usd }}
+                        <span class="text-3xl font-black text-primary">
+                            {{
+                                new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: 'USD',
+                                }).format(booking.total_amount_usd)
+                            }}
                         </span>
                     </div>
 
                     <Button
                         @click="submitPayment"
-                        class="hover:bg-primary-hover w-full bg-primary text-primary-foreground shadow-sm"
+                        class="hover:bg-primary-hover w-full bg-primary text-primary-foreground shadow-md transition-all hover:shadow-lg"
                         size="lg"
                         :disabled="isProcessing"
                     >
@@ -206,7 +302,22 @@ const submitPayment = async () => {
                             />
                         </svg>
                         <span v-if="isProcessing">Processing Payment...</span>
-                        <span v-else>Pay ${{ booking.total_amount_usd }}</span>
+                        <span v-else class="flex items-center gap-2">
+                            Pay Securely
+                            <svg
+                                class="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M14 5l7 7m0 0l-7 7m7-7H3"
+                                />
+                            </svg>
+                        </span>
                     </Button>
                 </div>
             </div>

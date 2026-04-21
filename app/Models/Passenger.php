@@ -8,19 +8,19 @@ class Passenger extends Model
 {
     protected $fillable = [
         'booking_id',
-        'seat_id',
+        'seat_code', // Berubah dari seat_id
+        'title', // Baru
         'first_name',
         'last_name',
-        'passport_number'
+        'date_of_birth', // Baru
+        'nationality', // Baru
+        'passport_number',
+        'extra_baggage_kg', // Baru
+        'baggage_fee_usd' // Baru
     ];
 
     public function booking()
     {
         return $this->belongsTo(Booking::class);
-    }
-
-    public function seat()
-    {
-        return $this->belongsTo(Seat::class);
     }
 }

@@ -10,7 +10,6 @@ class Seat extends Model
         'flight_id',
         'seat_code',
         'class',
-        'is_available',
         'additional_price_usd'
     ];
 

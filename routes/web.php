@@ -28,8 +28,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Dashboard Bawaan
     Route::inertia('dashboard', 'Dashboard')->name('dashboard');
 
-    // Alur Checkout
+    // Select Seat
     Route::get('/flights/{flight}/seats', [FlightController::class, 'selectSeat'])->name('flights.seats');
+    Route::post('/flights/select-external', [FlightController::class, 'selectExternalFlight'])->name('flights.selectExternal');
+
+    // Checkout
     Route::post('/flights/{flight}/book', [CheckoutController::class, 'passengerForm'])->name('flights.book');
     Route::post('/flights/{flight}/checkout', [CheckoutController::class, 'checkout'])->name('flights.checkout');
     Route::get('/checkout/success', [CheckoutController::class, 'success'])->name('checkout.success');

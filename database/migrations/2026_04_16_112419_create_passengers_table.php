@@ -6,24 +6,24 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('passengers', function (Blueprint $table) {
             $table->id();
             $table->foreignId('booking_id')->constrained()->cascadeOnDelete();
+            $table->string('seat_code')->nullable();
+            $table->enum('title', ['Mr', 'Mrs', 'Ms', 'Miss'])->default('Mr');
             $table->string('first_name');
             $table->string('last_name');
+            $table->date('date_of_birth')->nullable();
+            $table->string('nationality')->default('ID');
             $table->string('passport_number')->nullable();
+            $table->integer('extra_baggage_kg')->default(0);
+            $table->decimal('baggage_fee_usd', 10, 2)->default(0);
             $table->timestamps();
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('passengers');

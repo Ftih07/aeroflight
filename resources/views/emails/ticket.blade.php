@@ -114,6 +114,17 @@
             border-bottom-right-radius: 8px;
             border-top: 1px dashed #d1d5db;
         }
+
+        .airline-badge {
+            display: inline-block;
+            background: #e0e7ff;
+            color: #1d4ed8;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 
@@ -123,9 +134,7 @@
         <div class="header">
             <table>
                 <tr>
-                    <td class="logo">
-                        AeroFlight
-                    </td>
+                    <td class="logo">AeroFlight</td>
                     <td class="pnr-box">
                         <div class="pnr-title">Booking Reference (PNR)</div>
                         <div class="pnr-code">{{ $booking->pnr_code }}</div>
@@ -137,18 +146,19 @@
         <div class="content">
 
             <div class="section-title">Flight Details</div>
+            <div class="airline-badge">{{ $booking->flight->airline_name ?? $booking->flight->airline_code }}</div>
             <table class="info-table">
                 <tr>
                     <th>Flight No.</th>
                     <th>Route</th>
-                    <th>Status</th>
-                    <th>Date Issued</th>
+                    <th>Departure</th>
+                    <th>Arrival</th>
                 </tr>
                 <tr>
-                    <td><strong>{{ $booking->flight->flight_number }}</strong></td>
-                    <td>{{ $booking->flight->origin_airport }} - {{ $booking->flight->destination_airport }}</td>
-                    <td><strong style="color: #059669; text-transform: uppercase;">{{ $booking->status }}</strong></td>
-                    <td>{{ $booking->created_at->format('d M Y, H:i') }}</td>
+                    <td><strong>{{ $booking->flight->airline_code }}-{{ $booking->flight->flight_number }}</strong><br><small>{{ $booking->flight->aircraft->model_name ?? 'Aircraft TBA' }}</small></td>
+                    <td><strong>{{ $booking->flight->origin_airport }} - {{ $booking->flight->destination_airport }}</strong></td>
+                    <td>{{ \Carbon\Carbon::parse($booking->flight->departure_at)->format('d M Y, H:i') }}</td>
+                    <td>{{ \Carbon\Carbon::parse($booking->flight->arrival_at)->format('d M Y, H:i') }}</td>
                 </tr>
             </table>
 
@@ -158,26 +168,24 @@
                     <th>No.</th>
                     <th>Passenger Name</th>
                     <th>Passport / ID</th>
-                    <th>Seat Code</th>
+                    <th>Seat</th>
+                    <th>Baggage</th>
                 </tr>
                 @foreach($booking->passengers as $index => $passenger)
                 <tr>
                     <td style="text-align: center;">{{ $index + 1 }}</td>
-                    <td><strong>{{ strtoupper($passenger->first_name . ' ' . $passenger->last_name) }}</strong></td>
+                    <td><strong>{{ strtoupper($passenger->title . '. ' . $passenger->first_name . ' ' . $passenger->last_name) }}</strong></td>
                     <td>{{ $passenger->passport_number ?? '-' }}</td>
-                    <td><strong>{{ $passenger->seat->seat_code ?? '-' }}</strong></td>
+                    <td style="text-align: center;"><strong>{{ $passenger->seat_code ?? '-' }}</strong></td>
+                    <td>{{ $booking->flight->free_baggage_kg + $passenger->extra_baggage_kg }} KG</td>
                 </tr>
                 @endforeach
             </table>
 
             <div class="section-title">Payment Summary</div>
             <table class="info-table">
-                <tr>
-                    <th colspan="3" style="text-align: right;">Base Ticket Price (x{{ $booking->passengers->count() }})</th>
-                    <td style="text-align: right;">${{ number_format($booking->flight->base_price_usd * $booking->passengers->count(), 2) }}</td>
-                </tr>
                 <tr class="total-row">
-                    <td colspan="3" style="text-align: right;">TOTAL PAID</td>
+                    <td colspan="4" style="text-align: right;">TOTAL PAID ({{ $booking->status }})</td>
                     <td style="text-align: right;">${{ number_format($booking->total_amount_usd, 2) }}</td>
                 </tr>
             </table>

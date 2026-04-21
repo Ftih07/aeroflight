@@ -14,17 +14,56 @@ defineProps<{
     bookings: any[];
 }>();
 
+// --- 1. STATE MANAGEMENT ---
 // State untuk Modal Refund
 const showRefundModal = ref(false);
 const bookingToRefund = ref<number | null>(null);
 
-// Buka Modal
+// State untuk Modal Summary
+const showSummaryModal = ref(false);
+const activeBooking = ref<any | null>(null); // Pakai any agar TS tidak protes soal nested property
+
+// --- 2. HELPER FUNCTIONS ---
+const formatDate = (dateString: string) => {
+    if (!dateString) return '-';
+
+    return new Date(dateString).toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+    });
+};
+
+const formatTime = (dateString: string) => {
+    if (!dateString) return '--:--';
+
+    return new Date(dateString).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const calculateDuration = (departure: string, arrival: string) => {
+    if (!departure || !arrival) return '-';
+
+    const start = new Date(departure).getTime();
+    const end = new Date(arrival).getTime();
+    const diffMs = end - start;
+    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (diffHrs === 0) return `${diffMins}m`;
+
+    return `${diffHrs}h ${diffMins}m`;
+};
+
+// --- 3. MODAL HANDLERS ---
+// Modal Refund
 const openRefundModal = (id: number) => {
     bookingToRefund.value = id;
     showRefundModal.value = true;
 };
 
-// Tutup Modal
 const closeRefundModal = () => {
     showRefundModal.value = false;
     setTimeout(() => {
@@ -32,7 +71,6 @@ const closeRefundModal = () => {
     }, 200); // Tunggu animasi selesai baru reset ID
 };
 
-// Eksekusi Refund
 const confirmRefund = () => {
     if (bookingToRefund.value !== null) {
         router.post(
@@ -44,6 +82,26 @@ const confirmRefund = () => {
             },
         );
     }
+};
+
+// Modal Summary
+const openSummaryModal = (booking: any) => {
+    activeBooking.value = booking;
+    showSummaryModal.value = true;
+};
+
+const closeSummaryModal = () => {
+    showSummaryModal.value = false;
+    setTimeout(() => {
+        activeBooking.value = null;
+    }, 200);
+};
+
+const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+    }).format(value);
 };
 </script>
 
@@ -79,8 +137,9 @@ const confirmRefund = () => {
                     <a href="/#routes" class="mt-6 inline-block">
                         <Button
                             class="hover:bg-primary-hover bg-primary text-primary-foreground"
-                            >Explore Flights</Button
                         >
+                            Explore Flights
+                        </Button>
                     </a>
                 </div>
 
@@ -91,15 +150,27 @@ const confirmRefund = () => {
                         class="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:border-primary/40 hover:shadow-md md:flex-row"
                     >
                         <div class="flex-1 p-6">
-                            <div class="mb-6 flex items-center justify-between">
-                                <span
-                                    class="rounded-md bg-muted px-2.5 py-1 font-mono text-xs font-bold tracking-widest text-muted-foreground"
-                                >
-                                    PNR:
-                                    <span class="text-foreground">{{
-                                        booking.pnr_code || 'PENDING'
-                                    }}</span>
-                                </span>
+                            <div
+                                class="mb-6 flex flex-wrap items-center justify-between gap-2"
+                            >
+                                <div class="flex items-center gap-2">
+                                    <span
+                                        class="rounded-md bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary uppercase"
+                                    >
+                                        {{
+                                            booking.flight.airline_name ||
+                                            booking.flight.airline_code
+                                        }}
+                                    </span>
+                                    <span
+                                        class="rounded-md bg-muted px-2.5 py-1 font-mono text-xs font-bold tracking-widest text-muted-foreground"
+                                    >
+                                        PNR:
+                                        <span class="text-foreground">{{
+                                            booking.pnr_code || 'PENDING'
+                                        }}</span>
+                                    </span>
+                                </div>
 
                                 <span
                                     v-if="booking.status === 'paid'"
@@ -159,9 +230,17 @@ const confirmRefund = () => {
                                     class="flex flex-1 flex-col items-center px-4"
                                 >
                                     <span
-                                        class="mb-1 text-[10px] font-bold tracking-widest text-muted-foreground uppercase"
-                                        >Direct</span
+                                        v-if="!booking.flight.is_transit"
+                                        class="mb-1 text-[10px] font-bold tracking-widest text-emerald-500 uppercase"
                                     >
+                                        Direct
+                                    </span>
+                                    <span
+                                        v-else
+                                        class="mb-1 text-[10px] font-bold tracking-widest text-amber-500 uppercase"
+                                    >
+                                        Transit
+                                    </span>
                                     <div
                                         class="relative flex w-full items-center justify-center"
                                     >
@@ -185,7 +264,9 @@ const confirmRefund = () => {
                                     <p
                                         class="mt-2 text-xs font-semibold text-foreground"
                                     >
-                                        {{ booking.flight.flight_number }}
+                                        {{ booking.flight.airline_code }}-{{
+                                            booking.flight.flight_number
+                                        }}
                                     </p>
                                 </div>
 
@@ -216,9 +297,9 @@ const confirmRefund = () => {
                                         class="text-sm font-semibold text-foreground"
                                     >
                                         {{
-                                            new Date(
+                                            formatDate(
                                                 booking.flight.departure_at,
-                                            ).toLocaleDateString()
+                                            )
                                         }}
                                     </p>
                                 </div>
@@ -232,12 +313,9 @@ const confirmRefund = () => {
                                         class="text-sm font-semibold text-foreground"
                                     >
                                         {{
-                                            new Date(
+                                            formatTime(
                                                 booking.flight.departure_at,
-                                            ).toLocaleTimeString([], {
-                                                hour: '2-digit',
-                                                minute: '2-digit',
-                                            })
+                                            )
                                         }}
                                     </p>
                                 </div>
@@ -307,6 +385,14 @@ const confirmRefund = () => {
                         <div
                             class="flex flex-col justify-center gap-3 bg-muted/10 p-6 md:w-56"
                         >
+                            <Button
+                                @click="openSummaryModal(booking)"
+                                variant="outline"
+                                class="w-full shadow-sm"
+                            >
+                                View Details
+                            </Button>
+
                             <a
                                 v-if="['paid', 'used'].includes(booking.status)"
                                 :href="`/bookings/${booking.id}/ticket`"
@@ -342,7 +428,6 @@ const confirmRefund = () => {
                     class="absolute inset-0 bg-background/80 backdrop-blur-sm transition-opacity"
                     @click="closeRefundModal"
                 ></div>
-
                 <div
                     class="relative z-10 w-full max-w-md transform overflow-hidden rounded-2xl border border-border bg-card p-6 text-left shadow-2xl transition-all"
                 >
@@ -363,13 +448,11 @@ const confirmRefund = () => {
                             />
                         </svg>
                     </div>
-
                     <h3
                         class="mb-2 text-center text-lg font-bold text-foreground"
                     >
                         Confirm Refund Request
                     </h3>
-
                     <p class="mb-6 text-center text-sm text-muted-foreground">
                         Are you sure you want to cancel this booking and request
                         a refund? Your seat will be released and this action
@@ -377,7 +460,6 @@ const confirmRefund = () => {
                             >cannot be undone</span
                         >.
                     </p>
-
                     <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
                         <button
                             @click="closeRefundModal"
@@ -391,6 +473,305 @@ const confirmRefund = () => {
                         >
                             Yes, Refund
                         </button>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+        <transition name="modal">
+            <div
+                v-if="showSummaryModal && activeBooking"
+                class="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            >
+                <div
+                    class="absolute inset-0 bg-background/80 backdrop-blur-sm transition-opacity"
+                    @click="closeSummaryModal"
+                ></div>
+                <div
+                    class="relative z-10 w-full max-w-md transform overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-2xl transition-all"
+                >
+                    <button
+                        @click="closeSummaryModal"
+                        class="absolute top-4 right-4 text-muted-foreground hover:text-foreground"
+                    >
+                        <svg
+                            class="h-5 w-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12"
+                            />
+                        </svg>
+                    </button>
+
+                    <h3 class="mb-5 text-lg font-bold text-foreground">
+                        Booking Summary
+                    </h3>
+
+                    <div
+                        class="mb-6 rounded-xl border border-border bg-muted/20 p-4"
+                    >
+                        <div class="mb-3 text-center">
+                            <span
+                                class="inline-block rounded-md bg-primary/10 px-3 py-1 text-xs font-bold tracking-widest text-primary uppercase"
+                            >
+                                {{
+                                    activeBooking.flight.airline_name ||
+                                    activeBooking.flight.airline_code
+                                }}
+                            </span>
+                        </div>
+
+                        <div class="mb-4 flex items-center justify-between">
+                            <div class="text-left">
+                                <span
+                                    class="block text-lg font-black text-foreground"
+                                    >{{
+                                        activeBooking.flight.origin_airport
+                                    }}</span
+                                >
+                                <span
+                                    class="text-xs font-semibold text-muted-foreground"
+                                    >{{
+                                        formatTime(
+                                            activeBooking.flight.departure_at,
+                                        )
+                                    }}</span
+                                >
+                            </div>
+
+                            <div class="flex flex-col items-center px-2">
+                                <span
+                                    v-if="
+                                        !activeBooking.flight.transits ||
+                                        activeBooking.flight.transits ===
+                                            'null' ||
+                                        activeBooking.flight.transits.length ===
+                                            0
+                                    "
+                                    class="mb-1 text-[10px] font-bold tracking-widest text-emerald-500 uppercase"
+                                >
+                                    Direct
+                                </span>
+                                <span
+                                    v-else
+                                    class="mb-1 text-[10px] font-bold tracking-widest text-amber-500 uppercase"
+                                >
+                                    Transit
+                                </span>
+
+                                <span
+                                    class="mb-1 text-[10px] font-bold text-muted-foreground"
+                                >
+                                    {{
+                                        calculateDuration(
+                                            activeBooking.flight.departure_at,
+                                            activeBooking.flight.arrival_at,
+                                        )
+                                    }}
+                                </span>
+                                <div
+                                    class="relative flex w-full items-center justify-center"
+                                >
+                                    <div class="h-[2px] w-12 bg-border"></div>
+                                    <svg
+                                        class="absolute h-4 w-4 bg-transparent text-muted-foreground"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M14 5l7 7m0 0l-7 7m7-7H3"
+                                        />
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <div class="text-right">
+                                <span
+                                    class="block text-lg font-black text-foreground"
+                                    >{{
+                                        activeBooking.flight.destination_airport
+                                    }}</span
+                                >
+                                <span
+                                    class="text-xs font-semibold text-muted-foreground"
+                                    >{{
+                                        formatTime(
+                                            activeBooking.flight.arrival_at,
+                                        )
+                                    }}</span
+                                >
+                            </div>
+                        </div>
+
+                        <div
+                            class="flex items-center justify-between border-t border-border/50 pt-3 text-xs"
+                        >
+                            <span class="text-muted-foreground"
+                                >Flight No.</span
+                            >
+                            <span class="font-mono font-bold text-foreground">
+                                {{ activeBooking.flight.airline_code }}-{{
+                                    activeBooking.flight.flight_number
+                                }}
+                            </span>
+                        </div>
+                        <div
+                            class="mt-1 flex items-center justify-between text-xs"
+                        >
+                            <span class="text-muted-foreground">Aircraft</span>
+                            <span class="font-medium text-foreground">{{
+                                activeBooking.flight.aircraft?.model_name ||
+                                'TBA'
+                            }}</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="mb-6 flex flex-col gap-4 border-b border-border pb-5 text-sm"
+                    >
+                        <div class="flex items-start justify-between">
+                            <div class="flex flex-col">
+                                <span class="font-medium text-foreground">
+                                    Tickets (x{{
+                                        activeBooking.pax_count || 1
+                                    }})
+                                </span>
+                                <span
+                                    class="text-[10px] tracking-tight text-muted-foreground uppercase"
+                                >
+                                    {{
+                                        activeBooking.pax_count || 1
+                                    }}
+                                    passenger(s) @
+                                    {{
+                                        formatCurrency(
+                                            activeBooking.flight.base_price_usd,
+                                        )
+                                    }}
+                                </span>
+                            </div>
+                            <span class="font-bold text-foreground">
+                                {{
+                                    formatCurrency(
+                                        (activeBooking.pax_count || 1) *
+                                            activeBooking.flight.base_price_usd,
+                                    )
+                                }}
+                            </span>
+                        </div>
+
+                        <div
+                            v-if="activeBooking.seat_upgrade_fee > 0"
+                            class="flex items-start justify-between"
+                        >
+                            <div class="flex flex-col">
+                                <div class="flex items-center gap-1.5">
+                                    <span
+                                        class="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700 uppercase"
+                                    >
+                                        Seat Upgrades
+                                    </span>
+                                </div>
+                                <span
+                                    class="mt-0.5 text-[10px] tracking-tight text-muted-foreground uppercase"
+                                >
+                                    {{ activeBooking.pax_count || 1 }} seat(s) @
+                                    {{
+                                        formatCurrency(
+                                            activeBooking.seat_upgrade_fee /
+                                                (activeBooking.pax_count || 1),
+                                        )
+                                    }}
+                                </span>
+                            </div>
+                            <span class="font-bold text-foreground">
+                                +
+                                {{
+                                    formatCurrency(
+                                        activeBooking.seat_upgrade_fee,
+                                    )
+                                }}
+                            </span>
+                        </div>
+
+                        <div
+                            v-if="activeBooking.baggage_fee > 0"
+                            class="flex items-start justify-between"
+                        >
+                            <div class="flex flex-col">
+                                <div class="flex items-center gap-1.5">
+                                    <span
+                                        class="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 uppercase"
+                                    >
+                                        Extra Baggage
+                                    </span>
+                                </div>
+                                <span
+                                    class="mt-0.5 text-[10px] tracking-tight text-muted-foreground uppercase"
+                                >
+                                    Additional weight/items
+                                </span>
+                            </div>
+                            <span class="font-bold text-foreground">
+                                +
+                                {{ formatCurrency(activeBooking.baggage_fee) }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="mb-6 flex items-end justify-between">
+                        <span class="font-bold text-muted-foreground"
+                            >Total Price</span
+                        >
+                        <span class="text-3xl font-black text-primary">
+                            {{
+                                new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: 'USD',
+                                }).format(activeBooking.total_amount_usd || 0)
+                            }}
+                        </span>
+                    </div>
+
+                    <div v-if="['paid', 'used'].includes(activeBooking.status)">
+                        <a :href="`/bookings/${activeBooking.id}/ticket`">
+                            <Button
+                                class="hover:bg-primary-hover w-full bg-primary text-primary-foreground shadow-md transition-all hover:shadow-lg"
+                                size="lg"
+                            >
+                                Download E-Ticket
+                            </Button>
+                        </a>
+                    </div>
+                    <div
+                        v-else-if="
+                            activeBooking.status === 'pending' ||
+                            activeBooking.status === 'unpaid'
+                        "
+                    >
+                        <a :href="`/bookings/${activeBooking.id}/payment`">
+                            <Button
+                                class="w-full bg-blue-600 text-white shadow-md hover:bg-blue-700"
+                                size="lg"
+                            >
+                                Pay Securely &rarr;
+                            </Button>
+                        </a>
+                        <p
+                            class="mt-4 text-center text-xs text-muted-foreground"
+                        >
+                            Please complete your payment to secure the booking.
+                        </p>
                     </div>
                 </div>
             </div>
