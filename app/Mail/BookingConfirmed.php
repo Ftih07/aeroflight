@@ -17,7 +17,7 @@ class BookingConfirmed extends Mailable
     /**
      * Create a new message instance.
      */
-    public function __construct(public $booking, public $pdfContent) {}
+    public function __construct(public $booking, public $child_booking, public $pdfContent) {}
 
     /**
      * Get the message envelope.
@@ -25,7 +25,7 @@ class BookingConfirmed extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Booking Confirmed',
+            subject: 'Booking Confirmed - AeroFlight',
         );
     }
 

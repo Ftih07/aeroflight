@@ -28,13 +28,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Dashboard Bawaan
     Route::inertia('dashboard', 'Dashboard')->name('dashboard');
 
-    // Select Seat
-    Route::get('/flights/{flight}/seats', [FlightController::class, 'selectSeat'])->name('flights.seats');
-    Route::post('/flights/select-external', [FlightController::class, 'selectExternalFlight'])->name('flights.selectExternal');
-
+    // Select + Booking Seat
+    Route::post('/bookings/init', [CheckoutController::class, 'initBooking'])->name('bookings.init');
+    Route::get('/bookings/{booking_session}/passengers', [CheckoutController::class, 'passengerForm'])->name('bookings.passengers');
+    Route::post('/bookings/{booking_session}/seats', [CheckoutController::class, 'selectSeat'])->name('bookings.seats');
+    Route::post('/bookings/{booking_session}/checkout', [CheckoutController::class, 'checkout'])->name('bookings.checkout');
+    Route::get('/bookings/{booking}/payment', [CheckoutController::class, 'continuePayment'])->name('bookings.payment');
+    
     // Checkout
-    Route::post('/flights/{flight}/book', [CheckoutController::class, 'passengerForm'])->name('flights.book');
-    Route::post('/flights/{flight}/checkout', [CheckoutController::class, 'checkout'])->name('flights.checkout');
     Route::get('/checkout/success', [CheckoutController::class, 'success'])->name('checkout.success');
 
     // Area Manajemen Tiket User (History)

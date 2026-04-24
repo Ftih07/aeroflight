@@ -2,15 +2,18 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
 import { loadStripe } from '@stripe/stripe-js';
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { Button } from '@/components/ui/button';
 import AeroLayout from '@/layouts/AeroLayout.vue';
 
 defineOptions({ layout: null });
 
 const props = defineProps({
-    flight: Object,
+    flight: Object, // Outbound Flight
+    return_flight: Object, // Return Flight
     booking: Object,
+    grandTotal: Number,
+    isRoundTrip: Boolean,
     clientSecret: String,
     stripeKey: String,
 });
@@ -21,12 +24,42 @@ const errorMessage = ref('');
 let stripe = null;
 let elements = null;
 
+// --- CALCULATIONS UNTUK RINCIAN HARGA ---
+const baggageTotal = computed(() => {
+    return props.booking.passengers.reduce(
+        (sum, p) => sum + Number(p.baggage_fee_usd || 0),
+        0,
+    );
+});
+
+// Harga kursi dari tabel relasi (Asumsi seat prices udah terintegrasi di booking_amount sebelumnya)
+const baseFlightTotal = computed(() => {
+    let flightSum =
+        Number(props.flight.base_price_usd) * props.booking.passengers.length;
+
+    if (props.isRoundTrip && props.return_flight) {
+        flightSum +=
+            Number(props.return_flight.base_price_usd) *
+            props.booking.passengers.length;
+    }
+
+    return flightSum;
+});
+
+const seatUpgradeTotal = computed(() => {
+    // Sisa dari grandTotal - (base + baggage)
+    const currentGrand = props.grandTotal || props.booking.total_amount_usd;
+
+    return currentGrand - baseFlightTotal.value - baggageTotal.value;
+});
+
 // --- HELPER WAKTU & DURASI ---
 const formatTime = (dateString) =>
     new Date(dateString).toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
     });
+
 const calculateDuration = (departure, arrival) => {
     const diffMs = new Date(arrival) - new Date(departure);
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
@@ -34,6 +67,7 @@ const calculateDuration = (departure, arrival) => {
 
     return diffHrs === 0 ? `${diffMins}m` : `${diffHrs}h ${diffMins}m`;
 };
+
 const displayFlightNumber = (airlineCode, flightNumber) => {
     const code = String(airlineCode || '').toUpperCase();
     const num = String(flightNumber || '').toUpperCase();
@@ -74,10 +108,7 @@ onMounted(async () => {
                 color: '#6b7280',
                 marginBottom: '6px',
             },
-            '.Input--invalid': {
-                borderColor: '#ef4444',
-                color: '#ef4444',
-            },
+            '.Input--invalid': { borderColor: '#ef4444', color: '#ef4444' },
         },
     };
 
@@ -122,15 +153,16 @@ const submitPayment = async () => {
 
     <AeroLayout>
         <main
-            class="mx-auto min-h-[80vh] max-w-5xl px-4 pt-24 pb-12 sm:px-6 md:flex-row lg:px-8"
+            class="mx-auto min-h-[80vh] max-w-6xl px-4 pt-24 pb-12 sm:px-6 md:flex-row lg:px-8"
         >
-            <div class="flex flex-col gap-8 md:flex-row">
+            <div class="flex flex-col gap-8 lg:flex-row">
                 <div class="flex-1 space-y-6">
                     <h2 class="text-2xl font-bold text-foreground">
                         Complete Payment
                     </h2>
                     <p class="text-sm text-muted-foreground">
-                        All transactions are secured and encrypted.
+                        Please review your flight details and complete the
+                        payment. All transactions are secured and encrypted.
                     </p>
 
                     <div
@@ -157,52 +189,69 @@ const submitPayment = async () => {
                 </div>
 
                 <div
-                    class="sticky top-24 h-fit w-full rounded-2xl border border-border bg-card p-6 shadow-sm md:w-96"
+                    class="sticky top-24 h-fit w-full shrink-0 rounded-2xl border border-border bg-card p-6 shadow-sm md:w-96 lg:w-[400px]"
                 >
-                    <h3 class="mb-5 text-lg font-bold text-foreground">
-                        Order Summary
-                    </h3>
+                    <div class="mb-5 flex items-center justify-between">
+                        <h3 class="text-lg font-bold text-foreground">
+                            Order Summary
+                        </h3>
+                        <span
+                            class="rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs font-bold text-foreground shadow-sm"
+                        >
+                            #{{ String(booking.id).padStart(5, '0') }}
+                        </span>
+                    </div>
 
                     <div
-                        class="mb-6 rounded-xl border border-border bg-muted/20 p-4"
+                        class="relative mb-4 overflow-hidden rounded-xl border border-border bg-muted/20 p-4"
                     >
-                        <div class="mb-3 text-center">
+                        <div
+                            class="absolute top-0 left-0 h-full w-1 bg-emerald-500"
+                        ></div>
+                        <div
+                            class="mb-3 flex items-center justify-between border-b border-border/50 pb-3"
+                        >
                             <span
-                                class="inline-block rounded-md bg-primary/10 px-3 py-1 text-xs font-bold tracking-widest text-primary uppercase"
+                                class="inline-block rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold tracking-wider text-emerald-700 uppercase"
+                                >🛫 Outbound</span
                             >
-                                {{ flight.airline_name || flight.airline_code }}
-                            </span>
+                            <span class="font-mono text-xs font-bold">{{
+                                displayFlightNumber(
+                                    flight.airline_code,
+                                    flight.flight_number,
+                                )
+                            }}</span>
                         </div>
 
-                        <div class="mb-4 flex items-center justify-between">
+                        <div class="mb-3 flex items-center justify-between">
                             <div class="text-left">
                                 <span
-                                    class="block text-lg font-black text-foreground"
+                                    class="block text-xl font-black text-foreground"
                                     >{{ flight.origin_airport }}</span
                                 >
                                 <span
-                                    class="text-xs font-semibold text-muted-foreground"
+                                    class="text-[11px] font-semibold text-muted-foreground"
                                     >{{ formatTime(flight.departure_at) }}</span
                                 >
                             </div>
-
                             <div class="flex flex-col items-center px-2">
                                 <span
-                                    class="mb-1 text-[10px] font-bold text-muted-foreground"
+                                    v-if="flight.stop_count === 0"
+                                    class="text-[10px] font-bold text-emerald-500 uppercase"
+                                    >Direct</span
                                 >
-                                    {{
-                                        calculateDuration(
-                                            flight.departure_at,
-                                            flight.arrival_at,
-                                        )
-                                    }}
-                                </span>
+                                <span
+                                    v-else
+                                    class="text-[10px] font-bold text-amber-500 uppercase"
+                                    >{{ flight.stop_count }} Stop(s)</span
+                                >
+
                                 <div
-                                    class="relative flex w-full items-center justify-center"
+                                    class="relative my-1 flex w-full items-center justify-center"
                                 >
-                                    <div class="h-[2px] w-12 bg-border"></div>
+                                    <div class="h-[2px] w-10 bg-border"></div>
                                     <svg
-                                        class="absolute h-4 w-4 bg-transparent text-muted-foreground"
+                                        class="absolute h-3 w-3 bg-transparent text-muted-foreground"
                                         fill="none"
                                         viewBox="0 0 24 24"
                                         stroke="currentColor"
@@ -215,54 +264,200 @@ const submitPayment = async () => {
                                         />
                                     </svg>
                                 </div>
+                                <span
+                                    class="text-[10px] font-bold text-muted-foreground"
+                                    >{{
+                                        calculateDuration(
+                                            flight.departure_at,
+                                            flight.arrival_at,
+                                        )
+                                    }}</span
+                                >
                             </div>
-
                             <div class="text-right">
                                 <span
-                                    class="block text-lg font-black text-foreground"
+                                    class="block text-xl font-black text-foreground"
                                     >{{ flight.destination_airport }}</span
                                 >
                                 <span
-                                    class="text-xs font-semibold text-muted-foreground"
+                                    class="text-[11px] font-semibold text-muted-foreground"
                                     >{{ formatTime(flight.arrival_at) }}</span
                                 >
                             </div>
                         </div>
 
                         <div
-                            class="flex items-center justify-between border-t border-border/50 pt-3 text-xs"
+                            v-if="flight.stop_count > 0"
+                            class="mt-2 text-center text-[10px] text-muted-foreground"
                         >
-                            <span class="text-muted-foreground"
-                                >Flight No.</span
-                            >
-                            <span class="font-mono font-bold text-foreground">{{
-                                displayFlightNumber(
-                                    flight.airline_code,
-                                    flight.flight_number,
-                                )
-                            }}</span>
+                            via
+                            {{
+                                flight.transits
+                                    ?.map((t) => t.airport)
+                                    .join(', ')
+                            }}
                         </div>
                     </div>
 
                     <div
-                        class="mb-6 flex flex-col gap-3 border-b border-border pb-5 text-sm"
+                        v-if="isRoundTrip && return_flight"
+                        class="relative mb-6 overflow-hidden rounded-xl border border-border bg-muted/20 p-4"
+                    >
+                        <div
+                            class="absolute top-0 left-0 h-full w-1 bg-blue-500"
+                        ></div>
+                        <div
+                            class="mb-3 flex items-center justify-between border-b border-border/50 pb-3"
+                        >
+                            <span
+                                class="inline-block rounded-md bg-blue-100 px-2 py-0.5 text-[10px] font-bold tracking-wider text-blue-700 uppercase"
+                                >🛬 Return</span
+                            >
+                            <span class="font-mono text-xs font-bold">{{
+                                displayFlightNumber(
+                                    return_flight.airline_code,
+                                    return_flight.flight_number,
+                                )
+                            }}</span>
+                        </div>
+
+                        <div class="mb-3 flex items-center justify-between">
+                            <div class="text-left">
+                                <span
+                                    class="block text-xl font-black text-foreground"
+                                    >{{ return_flight.origin_airport }}</span
+                                >
+                                <span
+                                    class="text-[11px] font-semibold text-muted-foreground"
+                                    >{{
+                                        formatTime(return_flight.departure_at)
+                                    }}</span
+                                >
+                            </div>
+                            <div class="flex flex-col items-center px-2">
+                                <span
+                                    v-if="return_flight.stop_count === 0"
+                                    class="text-[10px] font-bold text-emerald-500 uppercase"
+                                    >Direct</span
+                                >
+                                <span
+                                    v-else
+                                    class="text-[10px] font-bold text-amber-500 uppercase"
+                                    >{{
+                                        return_flight.stop_count
+                                    }}
+                                    Stop(s)</span
+                                >
+
+                                <div
+                                    class="relative my-1 flex w-full items-center justify-center"
+                                >
+                                    <div class="h-[2px] w-10 bg-border"></div>
+                                    <svg
+                                        class="absolute h-3 w-3 bg-transparent text-muted-foreground"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M14 5l7 7m0 0l-7 7m7-7H3"
+                                        />
+                                    </svg>
+                                </div>
+                                <span
+                                    class="text-[10px] font-bold text-muted-foreground"
+                                    >{{
+                                        calculateDuration(
+                                            return_flight.departure_at,
+                                            return_flight.arrival_at,
+                                        )
+                                    }}</span
+                                >
+                            </div>
+                            <div class="text-right">
+                                <span
+                                    class="block text-xl font-black text-foreground"
+                                    >{{
+                                        return_flight.destination_airport
+                                    }}</span
+                                >
+                                <span
+                                    class="text-[11px] font-semibold text-muted-foreground"
+                                    >{{
+                                        formatTime(return_flight.arrival_at)
+                                    }}</span
+                                >
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="return_flight.stop_count > 0"
+                            class="mt-2 text-center text-[10px] text-muted-foreground"
+                        >
+                            via
+                            {{
+                                return_flight.transits
+                                    ?.map((t) => t.airport)
+                                    .join(', ')
+                            }}
+                        </div>
+                    </div>
+
+                    <div
+                        class="mb-6 flex flex-col gap-3 border-t border-b border-border py-4 text-sm"
                     >
                         <div class="flex items-center justify-between">
                             <span class="text-muted-foreground"
-                                >Booking ID</span
-                            >
-                            <span
-                                class="rounded bg-muted px-2 py-0.5 font-mono font-bold text-foreground"
-                            >
-                                #{{ String(booking.id).padStart(5, '0') }}
-                            </span>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <span class="text-muted-foreground"
-                                >Passengers</span
+                                >Flight Tickets (x{{
+                                    booking.passengers.length
+                                }})</span
                             >
                             <span class="font-semibold text-foreground">
-                                {{ booking.passengers.length }} Person(s)
+                                {{
+                                    new Intl.NumberFormat('en-US', {
+                                        style: 'currency',
+                                        currency: 'USD',
+                                    }).format(baseFlightTotal)
+                                }}
+                            </span>
+                        </div>
+
+                        <div
+                            v-if="baggageTotal > 0"
+                            class="flex items-center justify-between"
+                        >
+                            <span class="text-xs text-muted-foreground"
+                                >Extra Baggage</span
+                            >
+                            <span class="text-xs font-medium text-foreground">
+                                +
+                                {{
+                                    new Intl.NumberFormat('en-US', {
+                                        style: 'currency',
+                                        currency: 'USD',
+                                    }).format(baggageTotal)
+                                }}
+                            </span>
+                        </div>
+
+                        <div
+                            v-if="seatUpgradeTotal > 0"
+                            class="flex items-center justify-between"
+                        >
+                            <span class="text-xs text-muted-foreground"
+                                >Seat Upgrades</span
+                            >
+                            <span class="text-xs font-medium text-foreground">
+                                +
+                                {{
+                                    new Intl.NumberFormat('en-US', {
+                                        style: 'currency',
+                                        currency: 'USD',
+                                    }).format(seatUpgradeTotal)
+                                }}
                             </span>
                         </div>
                     </div>
@@ -276,7 +471,9 @@ const submitPayment = async () => {
                                 new Intl.NumberFormat('en-US', {
                                     style: 'currency',
                                     currency: 'USD',
-                                }).format(booking.total_amount_usd)
+                                }).format(
+                                    grandTotal || booking.total_amount_usd,
+                                )
                             }}
                         </span>
                     </div>

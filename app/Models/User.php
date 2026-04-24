@@ -12,7 +12,7 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 
-#[Fillable(['name', 'email', 'password', 'google_id', 'google_token', 'role'])] 
+#[Fillable(['name', 'email', 'password', 'google_id', 'google_token', 'role', 'loyalty_points'])] 
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 
 class User extends Authenticatable implements MustVerifyEmail, FilamentUser

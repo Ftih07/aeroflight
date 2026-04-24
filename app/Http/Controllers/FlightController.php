@@ -11,189 +11,150 @@ use Illuminate\Support\Facades\Cache;
 
 class FlightController extends Controller
 {
+    // Bikin private function pembantu biar gampang dipanggil buat berangkat & pulang
+    private function fetchFlights($origin, $destination, $date, DuffelService $duffelService)
+    {
+        if (!$origin || !$destination || !$date) return collect([]);
+
+        // Cari dari Internal
+        $internalFlights = \App\Models\Flight::with('aircraft')
+            ->where('provider', 'internal')
+            ->where('origin_airport', $origin)
+            ->where('destination_airport', $destination)
+            ->whereDate('departure_at', $date)
+            ->orderBy('departure_at')
+            ->get();
+
+        // Cari dari Duffel
+        $duffelFlights = collect([]);
+        $allAircrafts = \App\Models\Aircraft::all();
+        $rawDuffelOffers = $duffelService->searchFlights($origin, $destination, $date);
+
+        if ($rawDuffelOffers && $allAircrafts->isNotEmpty()) {
+            $duffelFlights = collect($rawDuffelOffers)->map(function ($offer) use ($allAircrafts) {
+                $segments = $offer['slices'][0]['segments'];
+                $firstSegment = $segments[0];
+                $lastSegment = end($segments);
+
+                $airlineCode = $offer['owner']['iata_code'];
+                $flightNum = $firstSegment['operating_carrier_flight_number'];
+                $departAt = Carbon::parse($firstSegment['departing_at'])->format('Y-m-d H:i:s');
+
+                // 👇 1. BIKIN STABLE ID (Biar nggak berubah tiap kali search)
+                $stableFlightId = "DUF-{$airlineCode}-{$flightNum}-" . strtotime($departAt);
+
+                // 👇 2. CEK DATABASE LOKAL (Apakah jadwal ini udah pernah di-generate & disimpen?)
+                $existingFlight = \App\Models\Flight::with('aircraft')
+                    ->where('provider', 'duffel')
+                    ->where('provider_flight_id', $stableFlightId)
+                    ->first();
+
+                // Kalau udah ada di DB, pake data pesawat & harga yang lama biar KONSISTEN!
+                if ($existingFlight) {
+                    return [
+                        'id' => $existingFlight->id,
+                        'provider' => 'duffel',
+                        'provider_flight_id' => $existingFlight->provider_flight_id,
+                        'airline_code' => $existingFlight->airline_code,
+                        'flight_number' => $existingFlight->flight_number,
+                        'origin_airport' => $existingFlight->origin_airport,
+                        'destination_airport' => $existingFlight->destination_airport,
+                        'departure_at' => $existingFlight->departure_at,
+                        'arrival_at' => $existingFlight->arrival_at,
+                        'base_price_usd' => $offer['total_amount'], // Base price tetep ngikutin harga live API
+                        'free_baggage_kg' => $existingFlight->free_baggage_kg,
+                        'cabin_baggage_kg' => $existingFlight->cabin_baggage_kg,
+                        'stop_count' => $existingFlight->stop_count,
+                        'transits' => $existingFlight->transits,
+                        'seat_prices' => $existingFlight->seat_prices,
+                        'facilities' => $existingFlight->facilities,
+                        'is_refundable' => $existingFlight->is_refundable,
+                        'is_reschedulable' => $existingFlight->is_reschedulable,
+                        'aircraft_id' => $existingFlight->aircraft_id,
+                        'aircraft' => $existingFlight->aircraft,
+                    ];
+                }
+
+                // 👇 3. JIKA BELUM ADA DI DB, BARU KITA RANDOM (Pesawat, Fasilitas, Bagasi, Transit)
+                $transitAirports = [];
+                for ($i = 0; $i < count($segments) - 1; $i++) {
+                    $transitAirports[] = [
+                        'airport' => $segments[$i]['destination']['iata_code'],
+                        // UBAH: Random durasi transit dari 45 menit ke 360 menit
+                        'duration_minutes' => rand(45, 360)
+                    ];
+                }
+
+                $randomAircraft = $allAircrafts->random();
+
+                // UBAH: Pilihan bagasi untuk di random
+                $cabinBaggageOptions = [7, 10];
+                $freeBaggageOptions = [15, 20, 25, 30];
+
+                return [
+                    'id' => null,
+                    'provider' => 'duffel',
+                    'provider_flight_id' => $stableFlightId, // <-- PAKE STABLE ID!
+                    'airline_code' => $airlineCode,
+                    'flight_number' => $flightNum,
+                    'origin_airport' => $firstSegment['origin']['iata_code'],
+                    'destination_airport' => $lastSegment['destination']['iata_code'],
+                    'departure_at' => $firstSegment['departing_at'],
+                    'arrival_at' => $lastSegment['arriving_at'],
+                    'base_price_usd' => $offer['total_amount'],
+
+                    // UBAH: Terapkan random bagasinya di sini
+                    'free_baggage_kg' => $freeBaggageOptions[array_rand($freeBaggageOptions)],
+                    'cabin_baggage_kg' => $cabinBaggageOptions[array_rand($cabinBaggageOptions)],
+
+                    'stop_count' => count($transitAirports),
+                    'transits' => $transitAirports,
+                    'seat_prices' => [
+                        'first_class' => rand(100, 300),
+                        'business' => rand(50, 150),
+                        'exit_row' => rand(20, 60),
+                        'window' => rand(10, 40),
+                    ],
+                    'facilities' => [
+                        'meal' => (bool) rand(0, 1),
+                        'wifi' => (bool) rand(0, 1),
+                        'entertainment' => (bool) rand(0, 1),
+                        'power_usb' => (bool) rand(0, 1),
+                    ],
+                    'is_refundable' => (bool) rand(0, 1),
+                    'is_reschedulable' => (bool) rand(0, 1),
+                    'aircraft_id' => $randomAircraft->id,
+                    'aircraft' => $randomAircraft
+                ];
+            });
+        }
+
+        return $internalFlights->concat($duffelFlights);
+    }
+
     public function search(Request $request, DuffelService $duffelService)
     {
         $origin = strtoupper($request->input('origin'));
         $destination = strtoupper($request->input('destination'));
         $date = $request->input('date');
 
-        // Cari dari Database Internal (Lokal)
-        $query = \App\Models\Flight::query()->where('provider', 'internal');
+        // Parameter Baru
+        $tripType = $request->input('trip_type', 'one_way');
+        $returnDate = $request->input('return_date');
 
-        if ($origin && $destination) {
-            $query->where('origin_airport', $origin)
-                ->where('destination_airport', $destination);
+        // Cari Penerbangan Berangkat
+        $outboundFlights = $this->fetchFlights($origin, $destination, $date, $duffelService);
+
+        // Cari Penerbangan Pulang (Jika Round Trip)
+        $returnFlights = collect([]);
+        if ($tripType === 'round_trip' && $returnDate) {
+            $returnFlights = $this->fetchFlights($destination, $origin, $returnDate, $duffelService);
         }
-        if ($date) {
-            $query->whereDate('departure_at', $date);
-        }
-        $internalFlights = $query->with('aircraft')->orderBy('departure_at')->get();
-
-        // Cari dari Duffel API
-        $duffelFlights = collect([]);
-        $allAircrafts = \App\Models\Aircraft::all();
-
-        if ($origin && $destination && $date) {
-            $rawDuffelOffers = $duffelService->searchFlights($origin, $destination, $date);
-
-            if ($rawDuffelOffers && $allAircrafts->isNotEmpty()) {
-                $duffelFlights = collect($rawDuffelOffers)->map(function ($offer) use ($allAircrafts) {
-                    $segments = $offer['slices'][0]['segments'];
-                    $firstSegment = $segments[0];
-                    $lastSegment = end($segments);
-
-                    $transitAirports = [];
-                    for ($i = 0; $i < count($segments) - 1; $i++) {
-                        $transitAirports[] = $segments[$i]['destination']['iata_code'];
-                    }
-
-                    $randomAircraft = $allAircrafts->random();
-
-                    return [
-                        'id' => null,
-                        'provider' => 'duffel',
-                        'provider_flight_id' => $offer['id'],
-                        'airline_code' => $offer['owner']['iata_code'],
-                        'flight_number' => $firstSegment['operating_carrier_flight_number'],
-                        'origin_airport' => $firstSegment['origin']['iata_code'],
-                        'destination_airport' => $lastSegment['destination']['iata_code'],
-                        'departure_at' => $firstSegment['departing_at'],
-                        'arrival_at' => $lastSegment['arriving_at'],
-                        'base_price_usd' => $offer['total_amount'],
-                        'free_baggage_kg' => 20,
-                        'transits' => $transitAirports, // Ini murni array IATA transit
-                        'seat_prices' => ['first_class' => 150, 'business' => 50, 'exit_row' => 25, 'window' => 15],
-                        'aircraft_id' => $randomAircraft->id,
-                        'aircraft' => $randomAircraft
-                    ];
-                });
-            }
-        }
-
-        $allFlights = $internalFlights->concat($duffelFlights);
 
         return Inertia::render('Flights/Search', [
-            'flights' => $allFlights,
-            'filters' => $request->only(['origin', 'destination', 'date'])
-        ]);
-    }
-
-    public function selectSeat($id)
-    {
-        $flight = Flight::with(['aircraft', 'seats'])->find($id);
-
-        if (!$flight) {
-            abort(404, 'Penerbangan tidak ditemukan di database lokal.');
-        }
-
-        $airlinesMap = Cache::remember('openflights_airlines', 86400, function () {
-            $response = \Illuminate\Support\Facades\Http::withoutVerifying()->get('https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat');
-            $map = [];
-            if ($response->successful()) {
-                foreach (explode("\n", $response->body()) as $line) {
-                    $cols = str_getcsv($line);
-                    if (count($cols) > 3 && !empty($cols[3]) && $cols[3] !== '\N' && $cols[3] !== '-') {
-                        $map[$cols[3]] = $cols[1];
-                    }
-                }
-            }
-            return $map;
-        });
-
-        $flight->airline_name = $airlinesMap[$flight->airline_code] ?? $flight->airline_code;
-
-        // 1. Ambil JSON Layout dari pesawat
-        $layoutData = $flight->aircraft->seat_layout ?? [
-            "config" => "3-3",
-            "rows" => 10,
-            "business_rows" => 2
-        ];
-
-        // 2. Ambil kursi yang sudah TERBELI/DIKUNCI
-        $bookedSeats = $flight->seats->pluck('seat_code')->toArray();
-
-        // 3. Generate struktur kursi untuk dilempar ke Vue
-        $groupedSeats = [];
-        $columns = explode('-', $layoutData['config']); // cth: ['3', '4', '3']
-        $totalSeatsPerRow = array_sum($columns); // Hitung total kursi (cth: 10)
-        $alphabet = range('A', 'Z');
-        $exitRows = $layoutData['exit_rows'] ?? []; // Ambil data pintu darurat
-
-        // AMBIL HARGA DINAMIS DARI TABEL FLIGHTS (Kalau null, pakai harga default ini)
-        $prices = $flight->seat_prices ?? [
-            'first_class' => 150,
-            'business' => 50,
-            'exit_row' => 25,
-            'window' => 15
-        ];
-
-        for ($r = 1; $r <= $layoutData['rows']; $r++) {
-            $rowSeats = [];
-            $colIndex = 0;
-
-            // Tentukan Kelas Dasar & Harga dari DB
-            $businessRows = $layoutData['business_rows'] ?? 0;
-            $firstClassRows = $layoutData['first_class_rows'] ?? 0;
-
-            if ($r <= $firstClassRows) {
-                $class = 'first_class';
-                $baseAdditional = $prices['first_class']; // Dinamis dari DB
-            } elseif ($r <= ($firstClassRows + $businessRows)) {
-                $class = 'business';
-                $baseAdditional = $prices['business']; // Dinamis dari DB
-            } else {
-                $class = 'economy';
-                $baseAdditional = 0.00;
-            }
-
-            // Cek Exit Row (Harga Selonjoran Kaki)
-            $isExitRow = in_array($r, $exitRows);
-            if ($isExitRow && $class === 'economy') {
-                $baseAdditional += $prices['exit_row']; // Dinamis dari DB
-            }
-
-            foreach ($columns as $groupIndex => $groupSize) {
-                for ($i = 0; $i < $groupSize; $i++) {
-                    $seatCode = $r . $alphabet[$colIndex];
-
-                    // Cek Jendela (Paling Kiri atau Paling Kanan)
-                    $isWindow = ($colIndex === 0 || $colIndex === ($totalSeatsPerRow - 1));
-
-                    // Cek Lorong (Kursi di pinggir dalam grup)
-                    $isAisle = ($i === 0 && $groupIndex !== 0) || ($i === ($groupSize - 1) && $groupIndex !== (count($columns) - 1));
-
-                    $finalPrice = $baseAdditional;
-                    if ($isWindow && $class === 'economy') {
-                        $finalPrice += $prices['window']; // Dinamis dari DB
-                    }
-
-                    $rowSeats[] = [
-                        'id' => $seatCode,
-                        'seat_code' => $seatCode,
-                        'class' => $class,
-                        'is_window' => $isWindow,
-                        'is_aisle' => $isAisle,
-                        'is_exit_row' => $isExitRow,
-                        'additional_price_usd' => $finalPrice, // Harga Fix Dinamis
-                        'is_available' => !in_array($seatCode, $bookedSeats)
-                    ];
-                    $colIndex++;
-                }
-
-                // THE MAGIC: Masukin "Ruang Kosong" buat jadi Lorong
-                if ($groupIndex < count($columns) - 1) {
-                    $rowSeats[] = [
-                        'id' => 'aisle_' . $r . '_' . $groupIndex,
-                        'is_aisle_space' => true // Tanda buat Frontend
-                    ];
-                }
-            }
-            $groupedSeats[$r] = $rowSeats;
-        }
-
-        return Inertia::render('Flights/SelectSeat', [
-            'flight' => $flight,
-            'groupedSeats' => $groupedSeats
+            'flights' => $outboundFlights, // Tetap pakai nama 'flights' utk keberangkatan
+            'returnFlights' => $returnFlights, // Data baru untuk kepulangan
+            'filters' => $request->only(['origin', 'destination', 'date', 'trip_type', 'return_date'])
         ]);
     }
 

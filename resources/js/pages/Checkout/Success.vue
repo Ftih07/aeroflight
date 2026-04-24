@@ -1,14 +1,26 @@
 <!-- eslint-disable vue/block-lang -->
 <script setup>
 import { Head, Link } from '@inertiajs/vue3';
+import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
 import AeroLayout from '@/layouts/AeroLayout.vue';
 
 defineOptions({ layout: null });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const props = defineProps({
-    booking: Object,
+    booking: Object, // Parent Booking (Outbound)
+    child_booking: { type: Object, default: null }, // Child Booking (Return)
+});
+
+// Hitung total harga gabungan
+const grandTotal = computed(() => {
+    let total = Number(props.booking.total_amount_usd);
+
+    if (props.child_booking) {
+        total += Number(props.child_booking.total_amount_usd);
+    }
+
+    return total;
 });
 
 const formatTime = (dateString) =>
@@ -16,6 +28,7 @@ const formatTime = (dateString) =>
         hour: '2-digit',
         minute: '2-digit',
     });
+
 const calculateDuration = (departure, arrival) => {
     const diffMs = new Date(arrival) - new Date(departure);
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
@@ -23,6 +36,7 @@ const calculateDuration = (departure, arrival) => {
 
     return diffHrs === 0 ? `${diffMins}m` : `${diffHrs}h ${diffMins}m`;
 };
+
 const displayFlightNumber = (airlineCode, flightNumber) => {
     const code = String(airlineCode || '').toUpperCase();
     const num = String(flightNumber || '').toUpperCase();
@@ -65,35 +79,87 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                         Payment Successful!
                     </h2>
                     <p class="mt-1 text-emerald-50">
-                        Your E-Ticket has been sent to your email.
+                        Your E-Ticket(s) have been sent to your email.
                     </p>
                 </div>
 
                 <div class="p-6 sm:p-8">
-                    <div class="mb-8 text-center">
-                        <p
-                            class="mb-1 text-sm tracking-wider text-muted-foreground uppercase"
+                    <div class="mb-8 flex flex-col gap-4">
+                        <div
+                            class="flex flex-col items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-center"
                         >
-                            Booking Reference (PNR)
-                        </p>
-                        <p
-                            class="font-mono text-5xl font-bold tracking-[0.2em] text-primary"
+                            <p
+                                class="mb-2 text-[10px] font-bold tracking-wider text-emerald-600 uppercase"
+                            >
+                                {{
+                                    child_booking
+                                        ? 'Outbound PNR'
+                                        : 'Booking Reference (PNR)'
+                                }}
+                            </p>
+                            <p
+                                class="mb-4 font-mono text-4xl font-black tracking-[0.15em] text-primary"
+                            >
+                                {{ booking.pnr_code }}
+                            </p>
+
+                            <div
+                                v-if="booking.qr_token"
+                                class="inline-block rounded-xl border border-border bg-white p-2 shadow-sm"
+                            >
+                                <img
+                                    :src="`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${booking.qr_token}`"
+                                    class="h-28 w-28"
+                                    alt="Boarding QR"
+                                />
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="child_booking"
+                            class="flex flex-col items-center justify-center rounded-xl border border-blue-500/30 bg-blue-500/5 p-6 text-center"
                         >
-                            {{ booking.pnr_code }}
-                        </p>
+                            <p
+                                class="mb-2 text-[10px] font-bold tracking-wider text-blue-600 uppercase"
+                            >
+                                Return PNR
+                            </p>
+                            <p
+                                class="mb-4 font-mono text-4xl font-black tracking-[0.15em] text-primary"
+                            >
+                                {{ child_booking.pnr_code }}
+                            </p>
+
+                            <div
+                                v-if="child_booking.qr_token"
+                                class="inline-block rounded-xl border border-border bg-white p-2 shadow-sm"
+                            >
+                                <img
+                                    :src="`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${child_booking.qr_token}`"
+                                    class="h-28 w-28"
+                                    alt="Boarding QR"
+                                />
+                            </div>
+                        </div>
                     </div>
 
                     <div
-                        class="mb-6 rounded-xl border border-border bg-muted/20 p-5"
+                        class="relative mb-4 overflow-hidden rounded-xl border border-border bg-muted/20 p-5"
                     >
+                        <div
+                            class="absolute top-0 left-0 h-full w-1 bg-emerald-500"
+                        ></div>
                         <div class="mb-3 text-center">
                             <span
-                                class="inline-block rounded-md bg-primary/10 px-3 py-1 text-xs font-bold tracking-widest text-primary uppercase"
+                                class="inline-block rounded-md bg-emerald-100 px-3 py-1 text-xs font-bold tracking-widest text-emerald-700 uppercase"
                             >
-                                {{ booking.flight.airline_name }}
+                                🛫
+                                {{
+                                    booking.flight.airline_name ||
+                                    booking.flight.airline_code
+                                }}
                             </span>
                         </div>
-
                         <div class="mb-4 flex items-center justify-between">
                             <div class="text-left">
                                 <span
@@ -107,22 +173,20 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                                     }}</span
                                 >
                             </div>
-
                             <div class="flex flex-col items-center px-2">
                                 <span
                                     class="mb-1 text-[10px] font-bold text-muted-foreground"
-                                >
-                                    {{
+                                    >{{
                                         calculateDuration(
                                             booking.flight.departure_at,
                                             booking.flight.arrival_at,
                                         )
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                                 <div
                                     class="relative flex w-full items-center justify-center"
                                 >
-                                    <div class="h-[2px] w-16 bg-border"></div>
+                                    <div class="h-[2px] w-12 bg-border"></div>
                                     <svg
                                         class="absolute h-5 w-5 bg-transparent text-primary"
                                         fill="none"
@@ -138,7 +202,6 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                                     </svg>
                                 </div>
                             </div>
-
                             <div class="text-right">
                                 <span
                                     class="block text-2xl font-black text-foreground"
@@ -154,9 +217,8 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                                 >
                             </div>
                         </div>
-
                         <div
-                            class="flex items-center justify-between border-t border-border/50 pt-3 text-sm"
+                            class="flex items-center justify-between border-t border-border/50 pt-3 text-xs"
                         >
                             <span class="text-muted-foreground"
                                 >Flight No.</span
@@ -165,6 +227,102 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                                 displayFlightNumber(
                                     booking.flight.airline_code,
                                     booking.flight.flight_number,
+                                )
+                            }}</span>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="child_booking"
+                        class="relative mb-6 overflow-hidden rounded-xl border border-border bg-muted/20 p-5"
+                    >
+                        <div
+                            class="absolute top-0 left-0 h-full w-1 bg-blue-500"
+                        ></div>
+                        <div class="mb-3 text-center">
+                            <span
+                                class="inline-block rounded-md bg-blue-100 px-3 py-1 text-xs font-bold tracking-widest text-blue-700 uppercase"
+                            >
+                                🛬
+                                {{
+                                    child_booking.flight.airline_name ||
+                                    child_booking.flight.airline_code
+                                }}
+                            </span>
+                        </div>
+                        <div class="mb-4 flex items-center justify-between">
+                            <div class="text-left">
+                                <span
+                                    class="block text-2xl font-black text-foreground"
+                                    >{{
+                                        child_booking.flight.origin_airport
+                                    }}</span
+                                >
+                                <span
+                                    class="text-xs font-semibold text-muted-foreground"
+                                    >{{
+                                        formatTime(
+                                            child_booking.flight.departure_at,
+                                        )
+                                    }}</span
+                                >
+                            </div>
+                            <div class="flex flex-col items-center px-2">
+                                <span
+                                    class="mb-1 text-[10px] font-bold text-muted-foreground"
+                                    >{{
+                                        calculateDuration(
+                                            child_booking.flight.departure_at,
+                                            child_booking.flight.arrival_at,
+                                        )
+                                    }}</span
+                                >
+                                <div
+                                    class="relative flex w-full items-center justify-center"
+                                >
+                                    <div class="h-[2px] w-12 bg-border"></div>
+                                    <svg
+                                        class="absolute h-5 w-5 bg-transparent text-primary"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M14 5l7 7m0 0l-7 7m7-7H3"
+                                        />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span
+                                    class="block text-2xl font-black text-foreground"
+                                    >{{
+                                        child_booking.flight.destination_airport
+                                    }}</span
+                                >
+                                <span
+                                    class="text-xs font-semibold text-muted-foreground"
+                                    >{{
+                                        formatTime(
+                                            child_booking.flight.arrival_at,
+                                        )
+                                    }}</span
+                                >
+                            </div>
+                        </div>
+                        <div
+                            class="flex items-center justify-between border-t border-border/50 pt-3 text-xs"
+                        >
+                            <span class="text-muted-foreground"
+                                >Flight No.</span
+                            >
+                            <span class="font-mono font-bold text-foreground">{{
+                                displayFlightNumber(
+                                    child_booking.flight.airline_code,
+                                    child_booking.flight.flight_number,
                                 )
                             }}</span>
                         </div>
@@ -181,7 +339,7 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                                 new Intl.NumberFormat('en-US', {
                                     style: 'currency',
                                     currency: 'USD',
-                                }).format(booking.total_amount_usd)
+                                }).format(grandTotal)
                             }}
                         </span>
                     </div>
@@ -208,7 +366,7 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                                         d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                                     />
                                 </svg>
-                                Download E-Ticket
+                                Download PDF Ticket
                             </Button>
                         </a>
                         <Link href="/my-bookings" class="block">

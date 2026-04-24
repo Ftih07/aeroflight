@@ -8,9 +8,20 @@ return new class extends Migration
 {
     public function up()
     {
+        Schema::create('airlines', function (Blueprint $table) {
+            $table->id();
+            $table->string('code')->unique(); 
+            $table->string('name');
+            $table->string('logo_path')->nullable();
+            $table->text('description')->nullable(); 
+            $table->timestamps();
+        });
+
         Schema::create('aircrafts', function (Blueprint $table) {
             $table->id();
             $table->string('model_name');
+            $table->string('manufacturer')->nullable();
+            $table->text('description')->nullable();
             $table->json('seat_layout');
             $table->timestamps();
         });

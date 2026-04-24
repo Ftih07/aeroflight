@@ -20,59 +20,97 @@
                 <h2 style="margin-top: 0; color: #0f172a; font-size: 22px;">Hello, {{ $booking->user->name ?? 'Valued Passenger' }},</h2>
 
                 @if($booking->status === 'paid')
-                <p style="line-height: 1.6; color: #475569; font-size: 15px;">Great news! Your payment has been successfully processed, and your flight booking is now <strong>confirmed</strong>. You will find your E-Ticket attached to this email.</p>
+                <p style="line-height: 1.6; color: #475569; font-size: 15px;">Great news! Your payment has been successfully processed, and your flight booking is now <strong>confirmed</strong>. You will find your detailed E-Ticket attached to this email.</p>
                 @else
                 <p style="line-height: 1.6; color: #475569; font-size: 15px;">We want to inform you about a recent update regarding your flight booking.</p>
                 @endif
 
-                <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin: 25px 0;">
+                <div style="text-align: center; margin: 25px 0; padding: 20px; background-color: #f1f5f9; border-radius: 8px; border: 1px dashed #cbd5e1;">
+                    <p style="margin: 0 0 5px 0; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">{{ isset($child_booking) && $child_booking ? 'Outbound PNR' : 'Booking Reference (PNR)' }}</p>
+                    <p style="margin: 0; font-size: 32px; font-weight: bold; color: #2563eb; letter-spacing: 2px;">{{ $booking->pnr_code ?? 'N/A' }}</p>
+
+                    @if(isset($child_booking) && $child_booking)
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                        <p style="margin: 0 0 5px 0; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Return PNR</p>
+                        <p style="margin: 0; font-size: 32px; font-weight: bold; color: #2563eb; letter-spacing: 2px;">{{ $child_booking->pnr_code ?? 'N/A' }}</p>
+                    </div>
+                    @endif
+                </div>
+
+                <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
                     <tr>
-                        <td style="padding: 25px;">
+                        <td style="padding: 20px;">
+                            <p style="margin: 0 0 15px 0; font-size: 11px; font-weight: bold; color: #059669; text-transform: uppercase; letter-spacing: 1px; background-color: #d1fae5; padding: 4px 8px; display: inline-block; border-radius: 4px;">🛫 Outbound</p>
 
-                            <div style="text-align: center; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #e2e8f0;">
-                                <p style="margin: 0 0 5px 0; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Booking Reference (PNR)</p>
-                                <p style="margin: 0; font-size: 32px; font-weight: bold; color: #2563eb; letter-spacing: 2px;">{{ $booking->pnr_code ?? 'N/A' }}</p>
-                            </div>
-
-                            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 15px;">
                                 <tr>
-                                    <td width="50%" style="padding-bottom: 15px;">
-                                        <p style="margin: 0; font-size: 12px; color: #64748b; text-transform: uppercase;">Airline</p>
-                                        <p style="margin: 4px 0 0 0; font-size: 15px; font-weight: bold; color: #0f172a;">{{ $booking->flight->airline_name ?? $booking->flight->airline_code }}</p>
+                                    <td width="50%" style="padding-bottom: 10px;">
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Airline</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">{{ $booking->flight->airline_name ?? $booking->flight->airline_code }}</p>
                                     </td>
-                                    <td width="50%" style="padding-bottom: 15px; text-align: right;">
-                                        <p style="margin: 0; font-size: 12px; color: #64748b; text-transform: uppercase;">Flight No.</p>
-                                        <p style="margin: 4px 0 0 0; font-size: 15px; font-weight: bold; color: #0f172a;">
-                                            {{ str_contains($booking->flight->flight_number, $booking->flight->airline_code) || str_contains($booking->flight->flight_number, '-') ? $booking->flight->flight_number : $booking->flight->airline_code . '-' . $booking->flight->flight_number }}
-                                        </p>
+                                    <td width="50%" style="padding-bottom: 10px; text-align: right;">
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Flight No.</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">{{ str_contains($booking->flight->flight_number, $booking->flight->airline_code) || str_contains($booking->flight->flight_number, '-') ? $booking->flight->flight_number : $booking->flight->airline_code . '-' . $booking->flight->flight_number }}</p>
                                     </td>
                                 </tr>
                                 <tr>
                                     <td width="50%">
-                                        <p style="margin: 0; font-size: 12px; color: #64748b; text-transform: uppercase;">Route</p>
-                                        <p style="margin: 4px 0 0 0; font-size: 18px; font-weight: bold; color: #0f172a;">{{ $booking->flight->origin_airport }} -> {{ $booking->flight->destination_airport }}</p>
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Route</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 16px; font-weight: bold; color: #0f172a;">{{ $booking->flight->origin_airport }} &rarr; {{ $booking->flight->destination_airport }}</p>
                                     </td>
                                     <td width="50%" style="text-align: right;">
-                                        <p style="margin: 0; font-size: 12px; color: #64748b; text-transform: uppercase;">Date</p>
-                                        <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">{{ \Carbon\Carbon::parse($booking->flight->departure_at)->format('d M Y') }}</p>
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Date & Time</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">{{ \Carbon\Carbon::parse($booking->flight->departure_at)->format('d M Y, H:i') }}</p>
                                     </td>
                                 </tr>
                             </table>
-
-                            <table width="100%">
-                                <tr>
-                                    <td style="background-color: #ffffff; border: 1px solid #cbd5e1; padding: 12px; text-align: center; border-radius: 6px;">
-                                        <span style="font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Current Status</span><br>
-                                        <strong style="color: {{ $booking->status === 'paid' ? '#059669' : '#2563eb' }}; font-size: 18px; text-transform: uppercase; display: inline-block; margin-top: 4px;">{{ $booking->status }}</strong>
-                                    </td>
-                                </tr>
-                            </table>
-
                         </td>
                     </tr>
                 </table>
 
-                <p style="line-height: 1.6; color: #475569; margin-bottom: 0; font-size: 14px;">If you have any questions about your booking, feel free to contact our support team.<br><br>Safe travels,<br><strong>The AeroFlight Team</strong></p>
+                @if(isset($child_booking) && $child_booking)
+                <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+                    <tr>
+                        <td style="padding: 20px;">
+                            <p style="margin: 0 0 15px 0; font-size: 11px; font-weight: bold; color: #1d4ed8; text-transform: uppercase; letter-spacing: 1px; background-color: #dbeafe; padding: 4px 8px; display: inline-block; border-radius: 4px;">🛬 Return</p>
+
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 15px;">
+                                <tr>
+                                    <td width="50%" style="padding-bottom: 10px;">
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Airline</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">{{ $child_booking->flight->airline_name ?? $child_booking->flight->airline_code }}</p>
+                                    </td>
+                                    <td width="50%" style="padding-bottom: 10px; text-align: right;">
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Flight No.</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">{{ str_contains($child_booking->flight->flight_number, $child_booking->flight->airline_code) || str_contains($child_booking->flight->flight_number, '-') ? $child_booking->flight->flight_number : $child_booking->flight->airline_code . '-' . $child_booking->flight->flight_number }}</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td width="50%">
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Route</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 16px; font-weight: bold; color: #0f172a;">{{ $child_booking->flight->origin_airport }} &rarr; {{ $child_booking->flight->destination_airport }}</p>
+                                    </td>
+                                    <td width="50%" style="text-align: right;">
+                                        <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase;">Date & Time</p>
+                                        <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">{{ \Carbon\Carbon::parse($child_booking->flight->departure_at)->format('d M Y, H:i') }}</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+                @endif
+
+                <table width="100%">
+                    <tr>
+                        <td style="background-color: #ffffff; border: 1px solid #cbd5e1; padding: 12px; text-align: center; border-radius: 6px;">
+                            <span style="font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Total Paid & Status</span><br>
+                            <strong style="color: {{ $booking->status === 'paid' ? '#059669' : '#2563eb' }}; font-size: 18px; text-transform: uppercase; display: inline-block; margin-top: 4px;">${{ number_format($booking->total_amount_usd + (isset($child_booking) ? $child_booking->total_amount_usd : 0), 2) }} - {{ $booking->status }}</strong>
+                        </td>
+                    </tr>
+                </table>
+
+                <p style="line-height: 1.6; color: #475569; margin-bottom: 0; margin-top: 30px; font-size: 14px;">If you have any questions about your booking, feel free to contact our support team.<br><br>Safe travels,<br><strong>The AeroFlight Team</strong></p>
             </td>
         </tr>
 

@@ -42,74 +42,230 @@
                     <div
                         class="rounded-xl border border-border bg-card p-4 text-left shadow-sm"
                     >
-                        <div class="mb-3 flex flex-wrap gap-1.5">
-                            <button
-                                v-for="type in tripTypes"
-                                :key="type.value"
-                                @click="tripType = type.value"
+                        <form @submit.prevent="submitHomeSearch">
+                            <div class="mb-3 flex flex-wrap gap-1.5">
+                                <button
+                                    type="button"
+                                    v-for="type in tripTypes"
+                                    :key="type.value"
+                                    @click="tripType = type.value"
+                                    :class="
+                                        tripType === type.value
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+                                    "
+                                    class="rounded-md px-3 py-1 text-xs font-semibold transition-all"
+                                >
+                                    {{ type.label }}
+                                </button>
+                            </div>
+
+                            <div
+                                class="grid grid-cols-1 gap-2.5"
                                 :class="
-                                    tripType === type.value
-                                        ? 'bg-primary text-primary-foreground'
-                                        : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+                                    tripType === 'round_trip'
+                                        ? 'sm:grid-cols-4'
+                                        : 'sm:grid-cols-3'
                                 "
-                                class="rounded-md px-3 py-1 text-xs font-semibold transition-all"
                             >
-                                {{ type.label }}
+                                <div class="relative">
+                                    <label
+                                        class="mb-1 block text-xs font-semibold text-muted-foreground"
+                                        >From</label
+                                    >
+                                    <input
+                                        type="text"
+                                        v-model="displayOrigin"
+                                        @input="searchAirport('origin')"
+                                        @focus="searchAirport('origin')"
+                                        @blur="hideDropdowns"
+                                        :disabled="isAirportsLoading"
+                                        placeholder="Jakarta (CGK)"
+                                        autocomplete="off"
+                                        class="aero-input w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground uppercase placeholder:text-muted-foreground placeholder:normal-case disabled:opacity-50"
+                                    />
+
+                                    <ul
+                                        v-if="originResults.length > 0"
+                                        class="absolute left-0 z-[9999] mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-2xl"
+                                    >
+                                        <li
+                                            v-for="airport in originResults"
+                                            :key="airport.code"
+                                            @mousedown.prevent="
+                                                selectAirport('origin', airport)
+                                            "
+                                            class="flex cursor-pointer items-center justify-between border-b border-border/40 px-3 py-2 transition-colors hover:bg-muted/50"
+                                        >
+                                            <div class="flex flex-col">
+                                                <span
+                                                    class="text-xs font-bold text-foreground"
+                                                    >{{ airport.city }}</span
+                                                >
+                                                <span
+                                                    class="text-[9px] text-muted-foreground"
+                                                    >{{ airport.name }}</span
+                                                >
+                                            </div>
+                                            <span
+                                                class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary"
+                                                >{{ airport.code }}</span
+                                            >
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div class="relative">
+                                    <label
+                                        class="mb-1 block text-xs font-semibold text-muted-foreground"
+                                        >To</label
+                                    >
+                                    <input
+                                        type="text"
+                                        v-model="displayDestination"
+                                        @input="searchAirport('destination')"
+                                        @focus="searchAirport('destination')"
+                                        @blur="hideDropdowns"
+                                        :disabled="isLoading"
+                                        placeholder="Bali (DPS)"
+                                        autocomplete="off"
+                                        class="aero-input w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground uppercase placeholder:text-muted-foreground placeholder:normal-case disabled:opacity-50"
+                                    />
+
+                                    <ul
+                                        v-if="destinationResults.length > 0"
+                                        class="absolute left-0 z-[9999] mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-2xl"
+                                    >
+                                        <li
+                                            v-for="airport in destinationResults"
+                                            :key="airport.code"
+                                            @mousedown.prevent="
+                                                selectAirport(
+                                                    'destination',
+                                                    airport,
+                                                )
+                                            "
+                                            class="flex cursor-pointer items-center justify-between border-b border-border/40 px-3 py-2 transition-colors hover:bg-muted/50"
+                                        >
+                                            <div class="flex flex-col">
+                                                <span
+                                                    class="text-xs font-bold text-foreground"
+                                                    >{{ airport.city }}</span
+                                                >
+                                                <span
+                                                    class="text-[9px] text-muted-foreground"
+                                                    >{{ airport.name }}</span
+                                                >
+                                            </div>
+                                            <span
+                                                class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary"
+                                                >{{ airport.code }}</span
+                                            >
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div>
+                                    <label
+                                        class="mb-1 block text-xs font-semibold text-muted-foreground"
+                                        >Depart</label
+                                    >
+                                    <input
+                                        type="date"
+                                        v-model="searchForm.date"
+                                        class="aero-input w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                                    />
+                                </div>
+
+                                <div v-if="tripType === 'round_trip'">
+                                    <label
+                                        class="mb-1 block text-xs font-semibold text-muted-foreground"
+                                        >Return</label
+                                    >
+                                    <input
+                                        type="date"
+                                        v-model="searchForm.returnDate"
+                                        :min="searchForm.date"
+                                        class="aero-input w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                                    />
+                                </div>
+                            </div>
+
+                            <button
+                                type="submit"
+                                class="hover:bg-primary-hover mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition"
+                            >
+                                <svg
+                                    class="h-4 w-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                                    />
+                                </svg>
+                                Search Flights
                             </button>
-                        </div>
-                        <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                            <div>
-                                <label
-                                    class="mb-1 block text-xs font-semibold text-muted-foreground"
-                                    >From</label
-                                >
-                                <input
-                                    type="text"
-                                    placeholder="Jakarta (CGK)"
-                                    class="aero-input w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
-                                />
-                            </div>
-                            <div>
-                                <label
-                                    class="mb-1 block text-xs font-semibold text-muted-foreground"
-                                    >To</label
-                                >
-                                <input
-                                    type="text"
-                                    placeholder="Bali (DPS)"
-                                    class="aero-input w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
-                                />
-                            </div>
-                            <div>
-                                <label
-                                    class="mb-1 block text-xs font-semibold text-muted-foreground"
-                                    >Date</label
-                                >
-                                <input
-                                    type="date"
-                                    class="aero-input w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
-                                />
-                            </div>
-                        </div>
-                        <button
-                            @click="$inertia.get('/flights')"
-                            class="hover:bg-primary-hover mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition"
+                        </form>
+
+                        <div
+                            v-if="recentSearches.length > 0"
+                            class="mt-4 border-t border-border/50 pt-3"
                         >
-                            <svg
-                                class="h-4 w-4"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                                />
-                            </svg>
-                            Search Flights
-                        </button>
+                            <div class="mb-2 flex items-center justify-between">
+                                <p
+                                    class="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                                >
+                                    Recent Searches:
+                                </p>
+                                <button
+                                    type="button"
+                                    @click="clearRecentSearches"
+                                    class="text-[10px] font-bold text-destructive transition-colors hover:text-red-700 hover:underline"
+                                >
+                                    Clear All
+                                </button>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button
+                                    v-for="item in formattedRecentSearches"
+                                    :key="item.uniqueKey"
+                                    @click="applyRecentSearch(item)"
+                                    class="flex flex-col items-start gap-1 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-foreground transition-colors hover:bg-muted/80"
+                                >
+                                    <!-- Route -->
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="font-bold">{{
+                                            item.origin
+                                        }}</span>
+                                        <span class="text-[10px]">⇄</span>
+                                        <span class="font-bold">{{
+                                            item.destination
+                                        }}</span>
+                                    </div>
+
+                                    <!-- Meta Info -->
+                                    <div
+                                        class="flex flex-wrap gap-2 text-[10px] text-muted-foreground"
+                                    >
+                                        <span>{{ item.formattedDate }}</span>
+
+                                        <span>{{
+                                            item.formattedTripType
+                                        }}</span>
+
+                                        <span v-if="item.formattedReturnDate">
+                                            • Return:
+                                            {{ item.formattedReturnDate }}
+                                        </span>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -771,19 +927,231 @@ export default {
 <script setup>
 /* eslint-disable import/order */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { Head } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import AeroLayout from '@/layouts/AeroLayout.vue';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // ── Search ────────────────────────────────────────────
-const tripType = ref('one-way');
 const tripTypes = [
-    { value: 'one-way', label: 'One Way' },
-    { value: 'round-trip', label: 'Round Trip' },
-    { value: 'multi-city', label: 'Multi-City' },
+    { value: 'one_way', label: 'One-Way' },
+    { value: 'round_trip', label: 'Round-Trip' },
 ];
+const tripType = ref('one_way');
+
+// --- LOGIC HAPUS RECENT SEARCH ---
+const clearRecentSearches = () => {
+    recentSearches.value = []; // Kosongkan state Vue
+    localStorage.removeItem('aero_recent_searches'); // Hapus dari browser storage
+};
+
+const displayOrigin = ref('');
+const displayDestination = ref('');
+const isAirportsLoading = ref(true); // Pakai nama baru biar gak bentrok sama Three.js
+
+const searchForm = ref({
+    origin: '',
+    destination: '',
+    date: '',
+    returnDate: '',
+});
+
+// State Recent Search ────────────────────────────────────────────
+const recentSearches = ref([]);
+
+const originResults = ref([]);
+const destinationResults = ref([]);
+const allAirports = ref([]);
+
+onMounted(() => {
+    // Load Recent Searches dari LocalStorage
+    const savedSearches = localStorage.getItem('aero_recent_searches');
+
+    if (savedSearches) {
+        recentSearches.value = JSON.parse(savedSearches);
+    }
+});
+
+const applyRecentSearch = (item) => {
+    displayOrigin.value = item.origin;
+    displayDestination.value = item.destination;
+
+    tripType.value = item.trip_type;
+    searchForm.value.date = item.date;
+    searchForm.value.returnDate = item.return_date || '';
+};
+
+const formattedRecentSearches = computed(() => {
+    return recentSearches.value.map((item) => ({
+        ...item,
+
+        formattedDate: item.date
+            ? new Date(item.date).toLocaleDateString('id-ID', {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+              })
+            : '',
+
+        formattedReturnDate: item.return_date
+            ? new Date(item.return_date).toLocaleDateString('id-ID', {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+              })
+            : '',
+
+        formattedTripType:
+            item.trip_type === 'round_trip' ? 'Round Trip' : 'One Way',
+
+        // key unik biar Vue optimal diffing
+        uniqueKey: `${item.origin}-${item.destination}-${item.date}-${item.trip_type}`,
+    }));
+});
+
+// --- 2. FETCH DATA BANDARA & LOAD LOCALSTORAGE ---
+onMounted(async () => {
+    // A. Load Recent Searches
+    const savedSearches = localStorage.getItem('aero_recent_searches');
+
+    if (savedSearches) {
+        recentSearches.value = JSON.parse(savedSearches);
+    }
+
+    // B. Fetch Data Bandara untuk Autocomplete
+    try {
+        isAirportsLoading.value = true; // <-- Update ke nama baru
+        const resAirports = await fetch(
+            'https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json',
+        );
+
+        if (resAirports.ok) {
+            const dataAirports = await resAirports.json();
+            allAirports.value = dataAirports.filter(
+                (a) => a.code && a.code.trim() !== '',
+            );
+        }
+    } catch (error) {
+        console.error('Gagal load bandara', error);
+    } finally {
+        isAirportsLoading.value = false; // <-- Update ke nama baru
+    }
+});
+
+// --- 3. LOGIC AUTOCOMPLETE BANDARA ---
+const searchAirport = (type) => {
+    if (isAirportsLoading.value) {
+        return [];
+    }
+
+    const term =
+        type === 'origin'
+            ? displayOrigin.value.toLowerCase()
+            : displayDestination.value.toLowerCase();
+
+    if (term.length < 2) {
+        if (type === 'origin') {
+            originResults.value = [];
+        } else {
+            destinationResults.value = [];
+        }
+
+        {
+            return [];
+        }
+    }
+
+    const results = allAirports.value
+        .filter((a) => {
+            return (
+                (a.code && a.code.toLowerCase().includes(term)) ||
+                (a.city && a.city.toLowerCase().includes(term)) ||
+                (a.name && a.name.toLowerCase().includes(term))
+            );
+        })
+        .slice(0, 10);
+
+    if (type === 'origin') {
+        originResults.value = results;
+    } else {
+        destinationResults.value = results;
+    }
+};
+
+const selectAirport = (type, airport) => {
+    if (type === 'origin') {
+        displayOrigin.value = `${airport.city} (${airport.code})`;
+        originResults.value = [];
+    } else {
+        displayDestination.value = `${airport.city} (${airport.code})`;
+        destinationResults.value = [];
+    }
+};
+
+const hideDropdowns = () => {
+    setTimeout(() => {
+        originResults.value = [];
+        destinationResults.value = [];
+    }, 200);
+};
+
+// --- 4. SUBMIT FORM & RECENT SEARCH LOGIC ---
+const extractCleanData = (text) => {
+    if (text.includes('(') && text.includes(')')) {
+        return text.split('(')[1].replace(')', '').trim();
+    }
+
+    return text.trim();
+};
+
+const saveToRecent = (searchParams) => {
+    let history = [...recentSearches.value];
+    history = history.filter(
+        (h) =>
+            !(
+                h.origin === searchParams.origin &&
+                h.destination === searchParams.destination &&
+                h.trip_type === searchParams.trip_type
+            ),
+    );
+    history.unshift(searchParams);
+    
+    if (history.length > 5) {
+        history.pop();
+    }
+
+    recentSearches.value = history;
+    localStorage.setItem('aero_recent_searches', JSON.stringify(history));
+};
+
+const submitHomeSearch = () => {
+    const cleanOrigin = extractCleanData(displayOrigin.value);
+    const cleanDestination = extractCleanData(displayDestination.value);
+
+    // Bawa ke halaman search kosong kalau ngga diisi rutenya
+    if (!cleanOrigin && !cleanDestination && !searchForm.value.date) {
+        router.get('/flights');
+        {
+            return [];
+        }
+    }
+
+    const searchParams = {
+        origin: cleanOrigin,
+        destination: cleanDestination,
+        date: searchForm.value.date,
+        trip_type: tripType.value,
+        return_date:
+            tripType.value === 'round_trip' ? searchForm.value.returnDate : '',
+    };
+
+    if (searchParams.origin && searchParams.destination) {
+        saveToRecent(searchParams);
+    }
+
+    router.get('/flights', searchParams);
+};
 
 // ── Three.js ──────────────────────────────────────────
 const isLoading = ref(false);
