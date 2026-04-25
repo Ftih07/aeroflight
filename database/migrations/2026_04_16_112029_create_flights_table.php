@@ -10,31 +10,54 @@ return new class extends Migration
     {
         Schema::create('flights', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('aircraft_id')->nullable()->constrained('aircrafts')->onDelete('set null');
-
-            $table->string('airline_code');
+            // Provider dan rute keseluruhan
             $table->enum('provider', ['internal', 'duffel'])->default('internal');
             $table->string('provider_flight_id')->nullable();
-            $table->string('flight_number');
             $table->string('origin_airport');
             $table->string('destination_airport');
 
-            // Informasi Perjalanan & Transit
-            $table->integer('stop_count')->default(0); // Mempermudah filter (0 = direct, 1 = 1 stop)
-            $table->json('transits')->nullable();
+            // Waktu keseluruhan dari bandara asal hingga tiba di tujuan akhir
             $table->dateTime('departure_at');
             $table->dateTime('arrival_at');
 
-            // Pricing & Policies
-            $table->decimal('base_price_usd', 10, 2);
-            $table->json('seat_prices')->nullable();
-            $table->boolean('is_refundable')->default(false); // Policy
-            $table->boolean('is_reschedulable')->default(false); // Policy
+            // Total stop (0 = direct, 1 = 1 stop transit)
+            $table->integer('stop_count')->default(0);
 
-            // Fasilitas & Bagasi
-            $table->json('facilities')->nullable(); // ['meal' => true, 'wifi' => false]
-            $table->integer('cabin_baggage_kg')->default(7); // Bagasi kabin
-            $table->integer('free_baggage_kg')->default(20); // Bagasi dalam (checked)
+            // Policy Umum
+            $table->boolean('is_refundable')->default(false);
+            $table->boolean('is_reschedulable')->default(false);
+
+            $table->timestamps();
+        });
+
+        Schema::create('flight_segments', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('flight_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('aircraft_id')->nullable()->constrained('aircrafts')->onDelete('set null');
+
+            $table->string('airline_code');
+            $table->string('flight_number'); // Contoh: GA123 untuk segmen pertama, SQ456 untuk segmen kedua
+            $table->string('origin_airport');
+            $table->string('destination_airport');
+
+            $table->dateTime('departure_at');
+            $table->dateTime('arrival_at');
+            $table->integer('segment_order')->default(1); // 1, 2, 3...
+
+            $table->timestamps();
+        });
+
+        Schema::create('flight_classes', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('flight_segment_id')->constrained()->cascadeOnDelete();
+
+            $table->enum('class_type', ['economy', 'business', 'first_class'])->default('economy');
+            $table->decimal('base_price_usd', 10, 2);
+
+            // Fasilitas & Bagasi per kelas
+            $table->json('facilities')->nullable();
+            $table->integer('cabin_baggage_kg')->default(7);
+            $table->integer('free_baggage_kg')->default(20);
 
             $table->timestamps();
         });

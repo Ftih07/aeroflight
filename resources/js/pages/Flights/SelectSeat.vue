@@ -11,9 +11,9 @@ const props = defineProps<{
     trip_type: string;
     passengers: any[]; // Data dari PassengerForm sebelumnya
     outbound_flight: any;
-    outbound_seats: Record<string, any[]>;
+    outbound_seats_map: Record<string, any>; // Menampung map bersarang per segment
     return_flight?: any;
-    return_seats?: Record<string, any[]>;
+    return_seats_map?: Record<string, any>;
 }>();
 
 // --- HELPER NAMA KOTA BANDARA ---
@@ -46,82 +46,192 @@ const getCityName = (code: string) => {
     return airport ? airport.name : '';
 };
 
-// --- 1. STATE MANAGEMENT ---
-const activeFlightTab = ref<'outbound' | 'return'>('outbound');
+// --- 1. STATE MANAGEMENT MULTI-SEGMENT ---
+const activeFlightDirection = ref<'outbound' | 'return'>('outbound');
 const activePassengerIndex = ref<number>(0);
+const activeSegmentId = ref<string | number>(
+    props.outbound_flight?.segments?.[0]?.id || '',
+);
 
-// Objek untuk menyimpan kursi { indexPenumpang: seatObject }
-const outboundSelections = ref<Record<number, any>>({});
-const returnSelections = ref<Record<number, any>>({});
+// Struktur data baru: selections.value[arah][index_penumpang][id_segment] = objekKursi
+const selections = ref<Record<string, Record<number, Record<string, any>>>>({
+    outbound: {},
+    return: {},
+});
+
+// Inisialisasi struktur object kosong untuk setiap penumpang
+props.passengers.forEach((_, i) => {
+    selections.value.outbound[i] = {};
+    selections.value.return[i] = {};
+});
 
 // --- 2. COMPUTED HELPERS UNTUK UI DINAMIS ---
-const currentSeatMap = computed(() =>
-    activeFlightTab.value === 'outbound'
-        ? props.outbound_seats
-        : props.return_seats,
-);
+const currentSegments = computed(() => {
+    return activeFlightDirection.value === 'outbound'
+        ? props.outbound_flight?.segments || []
+        : props.return_flight?.segments || [];
+});
 
-const currentSelections = computed(() =>
-    activeFlightTab.value === 'outbound'
-        ? outboundSelections.value
-        : returnSelections.value,
-);
+const currentSeatMap = computed(() => {
+    const mapSource =
+        activeFlightDirection.value === 'outbound'
+            ? props.outbound_seats_map
+            : props.return_seats_map;
 
-// --- 3. LOGIC PEMILIHAN KURSI ---
-const toggleSeat = (seat: any) => {
-    if (!seat.is_available) {
-        return [];
+    return mapSource ? mapSource[activeSegmentId.value] : {};
+});
+
+const currentSegmentSelections = computed(() => {
+    const currentDir = activeFlightDirection.value;
+    const segId = activeSegmentId.value;
+    const result: Record<number, any> = {};
+
+    for (let pIndex = 0; pIndex < props.passengers.length; pIndex++) {
+        if (
+            selections.value[currentDir][pIndex] &&
+            selections.value[currentDir][pIndex][segId]
+        ) {
+            result[pIndex] = selections.value[currentDir][pIndex][segId];
+        }
     }
 
-    const selections = currentSelections.value;
-    const pIndex = activePassengerIndex.value;
+    return result;
+});
 
-    const alreadySelectedByOther = Object.entries(selections).find(
-        ([idx, s]) => s.id === seat.id && Number(idx) !== pIndex,
-    );
-
-    if (alreadySelectedByOther) {
-        alert('Kursi ini sudah dipilih untuk penumpang lain.');
-
+// --- 3. LOGIC PEMILIHAN KURSI (DENGAN VALIDASI KELAS & ADJACENCY) ---
+const toggleSeat = (seat: any) => {
+    if (!seat.is_available) {
         return;
     }
 
-    if (selections[pIndex]?.id === seat.id) {
-        delete selections[pIndex];
-    } else {
-        selections[pIndex] = seat;
+    const pIndex = activePassengerIndex.value;
+    const currentDir = activeFlightDirection.value;
+    const segId = String(activeSegmentId.value);
 
-        if (pIndex < props.passengers.length - 1 && !selections[pIndex + 1]) {
-            activePassengerIndex.value = pIndex + 1;
+    // Cek apakah kursi ini sudah diambil penumpang lain di segment yang sama
+    const alreadySelectedByOther = Object.entries(
+        currentSegmentSelections.value,
+    ).find(([idx, s]) => s.id === seat.id && Number(idx) !== pIndex);
+
+    if (alreadySelectedByOther) {
+        return alert('Kursi ini sudah dipilih untuk penumpang lain.');
+    }
+
+    // Jika kursi sama di-klik ulang, berarti UNSELECT
+    if (selections.value[currentDir][pIndex][segId]?.id === seat.id) {
+        delete selections.value[currentDir][pIndex][segId];
+        
+        return;
+    }
+
+    // --- VALIDASI: HARUS DALAM KELAS YANG SAMA ---
+    const passengerZeroSeat = selections.value[currentDir][0][segId];
+
+    if (pIndex !== 0 && passengerZeroSeat) {
+        if (passengerZeroSeat.class !== seat.class) {
+            return alert(
+                `Penumpang harus berada di kelas yang sama (${passengerZeroSeat.class.replace('_', ' ').toUpperCase()}) dengan Penumpang 1.`,
+            );
         }
+    }
+
+    // --- VALIDASI: KURSI HARUS DEMPETAN JIKA > 1 PENUMPANG ---
+    if (pIndex > 0) {
+        const selectedSeatsInThisSegment = Object.values(
+            currentSegmentSelections.value,
+        ).filter((s: any) => s && s.id !== seat.id);
+
+        if (selectedSeatsInThisSegment.length > 0) {
+            const currentRow = parseInt(seat.seat_code.replace(/[^0-9]/g, ''));
+            const currentColChar = seat.seat_code.replace(/[0-9]/g, '');
+            const colCharCode = currentColChar.charCodeAt(0);
+
+            const isAdjacent = selectedSeatsInThisSegment.some(
+                (selSeat: any) => {
+                    const selRow = parseInt(
+                        selSeat.seat_code.replace(/[^0-9]/g, ''),
+                    );
+                    const selColChar = selSeat.seat_code.replace(/[0-9]/g, '');
+                    const selColCharCode = selColChar.charCodeAt(0);
+
+                    return (
+                        selRow === currentRow &&
+                        Math.abs(selColCharCode - colCharCode) === 1
+                    );
+                },
+            );
+
+            if (!isAdjacent) {
+                return alert(
+                    'Posisi kursi harus bersebelahan (dempetan) dengan penumpang lainnya dalam satu baris!',
+                );
+            }
+        }
+    }
+
+    // Lolos semua validasi, simpan kursinya
+    selections.value[currentDir][pIndex][segId] = seat;
+
+    // Auto-advance ke penumpang berikutnya JIKA belum milih kursi
+    if (
+        pIndex < props.passengers.length - 1 &&
+        !selections.value[currentDir][pIndex + 1][segId]
+    ) {
+        activePassengerIndex.value = pIndex + 1;
     }
 };
 
+const switchTab = (direction: 'outbound' | 'return') => {
+    activeFlightDirection.value = direction;
+    activePassengerIndex.value = 0;
+    const flights =
+        direction === 'outbound' ? props.outbound_flight : props.return_flight;
+    activeSegmentId.value = flights?.segments?.[0]?.id || '';
+};
+
+// Cek apakah semua kursi di semua segment dan semua arah sudah terisi
 const isReadyToCheckout = computed(() => {
-    const outboundDone =
-        Object.keys(outboundSelections.value).length ===
-        props.passengers.length;
+    let isReady = true;
 
-    if (props.trip_type === 'round_trip') {
-        const returnDone =
-            Object.keys(returnSelections.value).length ===
-            props.passengers.length;
-
-        return outboundDone && returnDone;
+    // Cek Outbound
+    for (let pIndex = 0; pIndex < props.passengers.length; pIndex++) {
+        props.outbound_flight?.segments?.forEach((seg: any) => {
+            if (!selections.value.outbound[pIndex][seg.id]) {
+                isReady = false;
+            }
+        });
     }
 
-    return outboundDone;
+    // Cek Return
+    if (props.trip_type === 'round_trip' && props.return_flight) {
+        for (let pIndex = 0; pIndex < props.passengers.length; pIndex++) {
+            props.return_flight?.segments?.forEach((seg: any) => {
+                if (!selections.value.return[pIndex][seg.id]) {
+                    isReady = false;
+                }
+            });
+        }
+    }
+
+    return isReady;
 });
 
 // --- 4. PERHITUNGAN HARGA TOTAL ---
 const totalSeatPrice = computed(() => {
     let total = 0;
-    Object.values(outboundSelections.value).forEach(
-        (seat: any) => (total += Number(seat.additional_price_usd)),
-    );
-    Object.values(returnSelections.value).forEach(
-        (seat: any) => (total += Number(seat.additional_price_usd)),
-    );
+    ['outbound', 'return'].forEach((dir) => {
+        if (dir === 'return' && props.trip_type !== 'round_trip') {
+            return;
+        }
+
+        Object.values(selections.value[dir]).forEach(
+            (passengerSelections: any) => {
+                Object.values(passengerSelections).forEach((seatObj: any) => {
+                    total += Number(seatObj.additional_price_usd || 0);
+                });
+            },
+        );
+    });
 
     return total;
 });
@@ -129,11 +239,11 @@ const totalSeatPrice = computed(() => {
 const totalPrice = computed(() => {
     const baseAndBaggageTotal = props.passengers.reduce((sum, p) => {
         let pTotal =
-            Number(props.outbound_flight.base_price_usd) +
+            Number(props.outbound_flight?.starting_price || 0) +
             Number(p.baggage_fee_usd || 0);
 
         if (props.trip_type === 'round_trip' && props.return_flight) {
-            pTotal += Number(props.return_flight.base_price_usd);
+            pTotal += Number(props.return_flight.starting_price || 0);
         }
 
         return sum + pTotal;
@@ -145,6 +255,11 @@ const totalPrice = computed(() => {
 // --- 5. FORMATTING HELPERS ---
 const calculateDuration = (departure: string, arrival: string): string => {
     const diffMs = new Date(arrival).getTime() - new Date(departure).getTime();
+
+    if (isNaN(diffMs)) {
+        return '-';
+    }
+
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
     const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
 
@@ -174,15 +289,32 @@ const displayFlightNumber = (airlineCode: string, flightNumber: string) => {
 // --- 6. SUBMIT KE CHECKOUT ---
 const proceedToCheckout = () => {
     if (!isReadyToCheckout.value) {
-        return [];
+        return;
     }
 
-    const finalPassengers = props.passengers.map((p, i) => ({
-        ...p,
-        outbound_seat: outboundSelections.value[i],
-        return_seat:
-            props.trip_type === 'round_trip' ? returnSelections.value[i] : null,
-    }));
+    // Mapping ulang object selections ke array untuk dilempar ke Controller
+    const finalPassengers = props.passengers.map((p, i) => {
+        const outSeatsArray = Object.keys(selections.value.outbound[i]).map(
+            (segId) => ({
+                segment_id: segId,
+                seat: selections.value.outbound[i][segId],
+            }),
+        );
+
+        const retSeatsArray =
+            props.trip_type === 'round_trip'
+                ? Object.keys(selections.value.return[i]).map((segId) => ({
+                      segment_id: segId,
+                      seat: selections.value.return[i][segId],
+                  }))
+                : null;
+
+        return {
+            ...p,
+            outbound_seats: outSeatsArray,
+            return_seats: retSeatsArray,
+        };
+    });
 
     router.post(`/bookings/${props.booking_session}/checkout`, {
         passengers: finalPassengers,
@@ -203,62 +335,71 @@ const proceedToCheckout = () => {
                 >
                     <div
                         v-if="trip_type === 'round_trip'"
-                        class="mb-8 flex justify-center gap-4 border-b border-border pb-4"
+                        class="mb-6 flex justify-center gap-4 border-b border-border pb-4"
                     >
                         <button
-                            @click="
-                                activeFlightTab = 'outbound';
-                                activePassengerIndex = 0;
-                            "
+                            @click="switchTab('outbound')"
                             :class="[
                                 'relative rounded-full px-6 py-2 font-bold transition',
-                                activeFlightTab === 'outbound'
+                                activeFlightDirection === 'outbound'
                                     ? 'bg-primary text-primary-foreground'
                                     : 'bg-muted text-muted-foreground hover:bg-muted/80',
                             ]"
                         >
                             🛫 Outbound Flight
-                            <div
-                                v-if="
-                                    Object.keys(outboundSelections).length ===
-                                    passengers.length
-                                "
-                                class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-[10px] text-white"
-                            >
-                                ✓
-                            </div>
                         </button>
                         <button
-                            @click="
-                                activeFlightTab = 'return';
-                                activePassengerIndex = 0;
-                            "
+                            @click="switchTab('return')"
                             :class="[
                                 'relative rounded-full px-6 py-2 font-bold transition',
-                                activeFlightTab === 'return'
+                                activeFlightDirection === 'return'
                                     ? 'bg-blue-600 text-white'
                                     : 'bg-muted text-muted-foreground hover:bg-muted/80',
                             ]"
                         >
                             🛬 Return Flight
-                            <div
-                                v-if="
-                                    Object.keys(returnSelections).length ===
-                                    passengers.length
-                                "
-                                class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-[10px] text-white"
+                        </button>
+                    </div>
+
+                    <div class="mb-8 flex flex-wrap justify-center gap-2">
+                        <button
+                            v-for="(seg, idx) in currentSegments"
+                            :key="seg.id"
+                            @click="activeSegmentId = seg.id"
+                            :class="[
+                                'flex flex-col items-center rounded-lg border-2 px-4 py-2 transition-all',
+                                activeSegmentId === seg.id
+                                    ? 'border-primary bg-primary/10'
+                                    : 'border-border bg-muted/30 hover:border-primary/30',
+                            ]"
+                        >
+                            <span
+                                class="text-xs font-bold text-muted-foreground uppercase"
+                                >Flight {{ idx + 1 }}</span
                             >
-                                ✓
-                            </div>
+                            <span class="text-sm font-black text-foreground">
+                                {{ seg.origin_airport }} ✈️
+                                {{ seg.destination_airport }}
+                            </span>
                         </button>
                     </div>
 
                     <h2 class="mb-2 text-2xl font-bold text-foreground">
                         Select Seats for
                         {{
-                            activeFlightTab === 'outbound'
-                                ? 'Outbound'
-                                : 'Return'
+                            getCityName(
+                                currentSegments.find(
+                                    (s: any) => s.id === activeSegmentId,
+                                )?.origin_airport,
+                            )
+                        }}
+                        to
+                        {{
+                            getCityName(
+                                currentSegments.find(
+                                    (s: any) => s.id === activeSegmentId,
+                                )?.destination_airport,
+                            )
                         }}
                     </h2>
                     <p class="mb-6 text-sm text-muted-foreground">
@@ -279,10 +420,18 @@ const proceedToCheckout = () => {
                         >
                             Passenger {{ i + 1 }}: {{ p.first_name }}
                             <span
-                                v-if="currentSelections[i]"
+                                v-if="
+                                    selections[activeFlightDirection][i][
+                                        activeSegmentId
+                                    ]
+                                "
                                 class="ml-2 rounded bg-primary px-1.5 py-0.5 text-xs text-primary-foreground"
                             >
-                                {{ currentSelections[i].seat_code }}
+                                {{
+                                    selections[activeFlightDirection][i][
+                                        activeSegmentId
+                                    ].seat_code
+                                }}
                             </span>
                         </button>
                     </div>
@@ -309,7 +458,7 @@ const proceedToCheckout = () => {
                                     <div
                                         v-if="
                                             seatsInRow.some(
-                                                (s) => s.is_exit_row,
+                                                (s: any) => s.is_exit_row,
                                             )
                                         "
                                         class="my-4 flex items-center justify-between opacity-80"
@@ -353,9 +502,9 @@ const proceedToCheckout = () => {
                                                     !seat.is_available
                                                         ? 'cursor-not-allowed border-border bg-muted opacity-40'
                                                         : Object.values(
-                                                                currentSelections,
+                                                                currentSegmentSelections,
                                                             ).some(
-                                                                (s) =>
+                                                                (s: any) =>
                                                                     s.id ===
                                                                     seat.id,
                                                             )
@@ -373,9 +522,9 @@ const proceedToCheckout = () => {
                                                     class="mt-1 h-2.5 w-6 rounded-full transition-colors sm:mt-1.5 sm:h-3 sm:w-8"
                                                     :class="[
                                                         Object.values(
-                                                            currentSelections,
+                                                            currentSegmentSelections,
                                                         ).some(
-                                                            (s) =>
+                                                            (s: any) =>
                                                                 s.id ===
                                                                 seat.id,
                                                         )
@@ -397,9 +546,9 @@ const proceedToCheckout = () => {
                                                         !seat.is_available
                                                             ? 'text-muted-foreground'
                                                             : Object.values(
-                                                                    currentSelections,
+                                                                    currentSegmentSelections,
                                                                 ).some(
-                                                                    (s) =>
+                                                                    (s: any) =>
                                                                         s.id ===
                                                                         seat.id,
                                                                 )
@@ -477,23 +626,24 @@ const proceedToCheckout = () => {
                         <div
                             class="absolute top-0 left-0 h-full w-1 bg-emerald-500"
                         ></div>
-
                         <div
                             class="mb-3 flex items-start justify-between border-b border-border/50 pb-3"
                         >
                             <div class="flex flex-col">
                                 <span class="text-sm font-bold text-foreground">
                                     {{
-                                        outbound_flight.airline_name ||
-                                        outbound_flight.airline_code
+                                        outbound_flight.segments?.[0]
+                                            ?.airlineData?.name ||
+                                        outbound_flight.segments?.[0]
+                                            ?.airline_code
                                     }}
                                 </span>
                                 <span
                                     class="text-[10px] font-medium tracking-tight text-muted-foreground uppercase"
                                 >
                                     {{
-                                        outbound_flight.aircraft?.model_name ||
-                                        'Aircraft TBA'
+                                        outbound_flight.segments?.[0]?.aircraft
+                                            ?.model_name || 'Aircraft TBA'
                                     }}
                                 </span>
                             </div>
@@ -502,8 +652,10 @@ const proceedToCheckout = () => {
                             >
                                 {{
                                     displayFlightNumber(
-                                        outbound_flight.airline_code,
-                                        outbound_flight.flight_number,
+                                        outbound_flight.segments?.[0]
+                                            ?.airline_code,
+                                        outbound_flight.segments?.[0]
+                                            ?.flight_number,
                                     )
                                 }}
                             </span>
@@ -530,7 +682,10 @@ const proceedToCheckout = () => {
                             </div>
                             <div class="flex flex-col items-center">
                                 <span
-                                    v-if="outbound_flight.stop_count === 0"
+                                    v-if="
+                                        !outbound_flight.stop_count ||
+                                        outbound_flight.stop_count === 0
+                                    "
                                     class="text-[10px] font-bold text-emerald-500 uppercase"
                                     >Direct</span
                                 >
@@ -542,13 +697,14 @@ const proceedToCheckout = () => {
                                 <div class="my-1 h-[2px] w-8 bg-border"></div>
                                 <span
                                     class="text-[10px] font-bold text-muted-foreground"
-                                    >{{
+                                >
+                                    {{
                                         calculateDuration(
                                             outbound_flight.departure_at,
                                             outbound_flight.arrival_at,
                                         )
-                                    }}</span
-                                >
+                                    }}
+                                </span>
                             </div>
                             <div class="text-right">
                                 <span
@@ -571,26 +727,6 @@ const proceedToCheckout = () => {
                                 }}</span>
                             </div>
                         </div>
-
-                        <div
-                            class="mt-3 flex justify-between rounded border border-border bg-background p-2 text-xs shadow-sm"
-                        >
-                            <span class="font-medium text-muted-foreground"
-                                >Seats Selected:</span
-                            >
-                            <span
-                                class="font-bold"
-                                :class="
-                                    Object.keys(outboundSelections).length ===
-                                    passengers.length
-                                        ? 'text-emerald-500'
-                                        : 'text-primary'
-                                "
-                            >
-                                {{ Object.keys(outboundSelections).length }} /
-                                {{ passengers.length }}
-                            </span>
-                        </div>
                     </div>
 
                     <div
@@ -600,23 +736,24 @@ const proceedToCheckout = () => {
                         <div
                             class="absolute top-0 left-0 h-full w-1 bg-blue-500"
                         ></div>
-
                         <div
                             class="mb-3 flex items-start justify-between border-b border-border/50 pb-3"
                         >
                             <div class="flex flex-col">
                                 <span class="text-sm font-bold text-foreground">
                                     {{
-                                        return_flight.airline_name ||
-                                        return_flight.airline_code
+                                        return_flight.segments?.[0]?.airlineData
+                                            ?.name ||
+                                        return_flight.segments?.[0]
+                                            ?.airline_code
                                     }}
                                 </span>
                                 <span
                                     class="text-[10px] font-medium tracking-tight text-muted-foreground uppercase"
                                 >
                                     {{
-                                        return_flight.aircraft?.model_name ||
-                                        'Aircraft TBA'
+                                        return_flight.segments?.[0]?.aircraft
+                                            ?.model_name || 'Aircraft TBA'
                                     }}
                                 </span>
                             </div>
@@ -625,8 +762,10 @@ const proceedToCheckout = () => {
                             >
                                 {{
                                     displayFlightNumber(
-                                        return_flight.airline_code,
-                                        return_flight.flight_number,
+                                        return_flight.segments?.[0]
+                                            ?.airline_code,
+                                        return_flight.segments?.[0]
+                                            ?.flight_number,
                                     )
                                 }}
                             </span>
@@ -653,7 +792,10 @@ const proceedToCheckout = () => {
                             </div>
                             <div class="flex flex-col items-center">
                                 <span
-                                    v-if="return_flight.stop_count === 0"
+                                    v-if="
+                                        !return_flight.stop_count ||
+                                        return_flight.stop_count === 0
+                                    "
                                     class="text-[10px] font-bold text-emerald-500 uppercase"
                                     >Direct</span
                                 >
@@ -665,13 +807,14 @@ const proceedToCheckout = () => {
                                 <div class="my-1 h-[2px] w-8 bg-border"></div>
                                 <span
                                     class="text-[10px] font-bold text-muted-foreground"
-                                    >{{
+                                >
+                                    {{
                                         calculateDuration(
                                             return_flight.departure_at,
                                             return_flight.arrival_at,
                                         )
-                                    }}</span
-                                >
+                                    }}
+                                </span>
                             </div>
                             <div class="text-right">
                                 <span
@@ -694,26 +837,6 @@ const proceedToCheckout = () => {
                                 }}</span>
                             </div>
                         </div>
-
-                        <div
-                            class="mt-3 flex justify-between rounded border border-border bg-background p-2 text-xs shadow-sm"
-                        >
-                            <span class="font-medium text-muted-foreground"
-                                >Seats Selected:</span
-                            >
-                            <span
-                                class="font-bold"
-                                :class="
-                                    Object.keys(returnSelections).length ===
-                                    passengers.length
-                                        ? 'text-emerald-500'
-                                        : 'text-blue-600'
-                                "
-                            >
-                                {{ Object.keys(returnSelections).length }} /
-                                {{ passengers.length }}
-                            </span>
-                        </div>
                     </div>
 
                     <div
@@ -726,15 +849,15 @@ const proceedToCheckout = () => {
                             <span class="text-muted-foreground"
                                 >Seat Selection Fees</span
                             >
-                            <span class="font-semibold text-foreground"
-                                >+
+                            <span class="font-semibold text-foreground">
+                                +
                                 {{
                                     new Intl.NumberFormat('en-US', {
                                         style: 'currency',
                                         currency: 'USD',
                                     }).format(totalSeatPrice)
-                                }}</span
-                            >
+                                }}
+                            </span>
                         </div>
                         <div class="mt-2 flex items-end justify-between">
                             <span class="font-bold text-muted-foreground"
@@ -759,7 +882,7 @@ const proceedToCheckout = () => {
                         :class="
                             isReadyToCheckout
                                 ? 'hover:bg-primary-hover bg-primary text-primary-foreground hover:shadow-lg'
-                                : 'bg-muted text-muted-foreground'
+                                : 'cursor-not-allowed bg-muted text-muted-foreground'
                         "
                     >
                         {{

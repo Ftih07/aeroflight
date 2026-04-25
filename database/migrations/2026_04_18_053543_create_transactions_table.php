@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('transactions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('booking_id')->constrained()->cascadeOnDelete();
+            $table->foreignUuid('booking_id')->constrained()->cascadeOnDelete();
             // Tipe transaksi: 'payment', 'refund', 'stripe_fee', 'cancellation_fee'
             $table->string('type');
             $table->decimal('amount', 10, 2);

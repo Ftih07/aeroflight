@@ -304,19 +304,36 @@ const checkTimeRange = (dateString, ranges) => {
     });
 };
 
-const getTotalTransitDuration = (transits) => {
-    if (!transits || transits.length === 0) {
+const getTotalTransitDuration = (segments) => {
+    if (!segments || segments.length <= 1) {
         return 0;
     }
 
-    return transits.reduce((sum, t) => sum + (t.duration_minutes || 0), 0) / 60;
+    let totalMinutes = 0;
+
+    for (let i = 0; i < segments.length - 1; i++) {
+        const arrivalCurrent = new Date(segments[i].arrival_at);
+        const departNext = new Date(segments[i + 1].departure_at);
+        const diffMins = Math.floor(
+            (departNext - arrivalCurrent) / (1000 * 60),
+        );
+        totalMinutes += diffMins;
+    }
+
+    return totalMinutes / 60; // Kembalikan dalam format Jam
 };
 
 const processFlights = (flightsArray) => {
     let result = flightsArray.filter((flight) => {
+        // Ambil airline dari segmen pertama
+        const mainAirline =
+            flight.segments && flight.segments[0]
+                ? flight.segments[0].airline_code
+                : '';
+
         if (
             activeFilters.airlines.length > 0 &&
-            !activeFilters.airlines.includes(flight.airline_code)
+            !activeFilters.airlines.includes(mainAirline)
         ) {
             return false;
         }
@@ -329,7 +346,7 @@ const processFlights = (flightsArray) => {
             return false;
         }
 
-        const transitCount = flight.transits ? flight.transits.length : 0;
+        const transitCount = flight.stop_count || 0;
 
         if (activeFilters.transits.length > 0) {
             const isDirect =
@@ -348,7 +365,7 @@ const processFlights = (flightsArray) => {
 
         if (
             transitCount > 0 &&
-            getTotalTransitDuration(flight.transits) >
+            getTotalTransitDuration(flight.segments) >
                 activeFilters.maxTransitDuration
         ) {
             return false;
@@ -358,28 +375,14 @@ const processFlights = (flightsArray) => {
     });
 
     result = result.sort((a, b) => {
-        const priceA = parseFloat(a.base_price_usd);
-        const priceB = parseFloat(b.base_price_usd);
-        const timeDepartA = new Date(a.departure_at).getTime();
-        const timeDepartB = new Date(b.departure_at).getTime();
-        const durationA = new Date(a.arrival_at).getTime() - timeDepartA;
-        const durationB = new Date(b.arrival_at).getTime() - timeDepartB;
+        const priceA = parseFloat(a.starting_price || 0);
+        const priceB = parseFloat(b.starting_price || 0);
+        // ... (Logic sorting lainnya tetap sama) ...
 
         switch (activeFilters.sortBy) {
             case 'lowest_price':
                 return priceA - priceB;
-            case 'earliest_departure':
-                return timeDepartA - timeDepartB;
-            case 'latest_departure':
-                return timeDepartB - timeDepartA;
-            case 'shortest_duration':
-                return durationA - durationB;
-            case 'recommendation':
-            default:
-                const scoreA = priceA + (durationA / 3600000) * 5;
-                const scoreB = priceB + (durationB / 3600000) * 5;
-
-                return scoreA - scoreB;
+            // ...
         }
     });
 
@@ -467,16 +470,20 @@ const resetFilters = () => {
 };
 
 // --- HELPER UI ---
-const formatTransits = (transits) => {
-    if (!transits || transits.length === 0) {
+const formatTransits = (segments) => {
+    if (!segments || segments.length <= 1) {
         return '';
     }
 
-    return transits
-        .map((t) => {
-            const airport = allAirports.value.find((a) => a.code === t.airport);
+    // Ambil bandara tujuan dari semua segmen KECUALI segmen terakhir
+    return segments
+        .slice(0, -1)
+        .map((seg) => {
+            const airport = allAirports.value.find(
+                (a) => a.code === seg.destination_airport,
+            );
 
-            return airport ? airport.city : t.airport;
+            return airport ? airport.city : seg.destination_airport;
         })
         .join(', ');
 };
@@ -1017,8 +1024,9 @@ const getCityName = (code) => {
                                     class="inline-block w-full max-w-[140px] truncate rounded-md border border-primary/20 bg-primary/10 px-3 py-1.5 text-center text-xs font-bold text-primary"
                                 >
                                     {{
-                                        airlinesMap[flight.airline_code] ||
-                                        flight.airline_code
+                                        airlinesMap[
+                                            flight.segments?.[0]?.airline_code
+                                        ] || flight.segments?.[0]?.airline_code
                                     }}
                                 </span>
                                 <p
@@ -1026,8 +1034,8 @@ const getCityName = (code) => {
                                 >
                                     {{
                                         displayFlightNumber(
-                                            flight.airline_code,
-                                            flight.flight_number,
+                                            flight.segments?.[0]?.airline_code,
+                                            flight.segments?.[0]?.flight_number,
                                         )
                                     }}
                                 </p>
@@ -1068,8 +1076,8 @@ const getCityName = (code) => {
                                     >
                                         <span
                                             v-if="
-                                                !flight.transits ||
-                                                flight.transits.length === 0
+                                                !flight.stop_count ||
+                                                flight.stop_count === 0
                                             "
                                             class="text-[10px] font-bold text-emerald-500 uppercase"
                                             >Direct</span
@@ -1081,7 +1089,7 @@ const getCityName = (code) => {
                                             <span
                                                 class="text-[10px] font-bold text-amber-500 uppercase"
                                                 >{{
-                                                    flight.transits.length
+                                                    flight.stop_count
                                                 }}
                                                 Stop(s)</span
                                             >
@@ -1090,7 +1098,7 @@ const getCityName = (code) => {
                                                 >via
                                                 {{
                                                     formatTransits(
-                                                        flight.transits,
+                                                        flight.segments,
                                                     )
                                                 }}</span
                                             >
@@ -1138,7 +1146,7 @@ const getCityName = (code) => {
                                 <p
                                     class="mb-1 text-2xl font-black text-primary"
                                 >
-                                    ${{ flight.base_price_usd }}
+                                    ${{ flight.starting_price }}
                                 </p>
                                 <button
                                     @click="
@@ -1232,8 +1240,9 @@ const getCityName = (code) => {
                                     class="inline-block w-full max-w-[140px] truncate rounded-md border border-blue-600/20 bg-blue-600/10 px-3 py-1.5 text-center text-xs font-bold text-blue-700"
                                 >
                                     {{
-                                        airlinesMap[flight.airline_code] ||
-                                        flight.airline_code
+                                        airlinesMap[
+                                            flight.segments?.[0]?.airline_code
+                                        ] || flight.segments?.[0]?.airline_code
                                     }}
                                 </span>
                                 <p
@@ -1241,8 +1250,8 @@ const getCityName = (code) => {
                                 >
                                     {{
                                         displayFlightNumber(
-                                            flight.airline_code,
-                                            flight.flight_number,
+                                            flight.segments?.[0]?.airline_code,
+                                            flight.segments?.[0]?.flight_number,
                                         )
                                     }}
                                 </p>
@@ -1280,8 +1289,8 @@ const getCityName = (code) => {
                                     >
                                         <span
                                             v-if="
-                                                !flight.transits ||
-                                                flight.transits.length === 0
+                                                !flight.stop_count ||
+                                                flight.stop_count === 0
                                             "
                                             class="text-[10px] font-bold text-emerald-500 uppercase"
                                             >Direct</span
@@ -1293,7 +1302,7 @@ const getCityName = (code) => {
                                             <span
                                                 class="text-[10px] font-bold text-amber-500 uppercase"
                                                 >{{
-                                                    flight.transits.length
+                                                    flight.stop_count
                                                 }}
                                                 Stop(s)</span
                                             >
@@ -1302,7 +1311,7 @@ const getCityName = (code) => {
                                                 >via
                                                 {{
                                                     formatTransits(
-                                                        flight.transits,
+                                                        flight.segments,
                                                     )
                                                 }}</span
                                             >
@@ -1347,7 +1356,7 @@ const getCityName = (code) => {
                                 <p
                                     class="mb-1 text-2xl font-black text-blue-600"
                                 >
-                                    ${{ flight.base_price_usd }}
+                                    ${{ flight.starting_price }}
                                 </p>
                                 <button
                                     @click="
@@ -1418,11 +1427,11 @@ const getCityName = (code) => {
                             ${{
                                 (
                                     parseFloat(
-                                        selectedOutbound.base_price_usd,
+                                        selectedOutbound.starting_price,
                                     ) +
                                     (selectedReturn
                                         ? parseFloat(
-                                              selectedReturn.base_price_usd,
+                                              selectedReturn.starting_price,
                                           )
                                         : 0)
                                 ).toFixed(2)

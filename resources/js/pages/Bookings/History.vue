@@ -32,7 +32,6 @@ onMounted(async () => {
         const res = await fetch(
             'https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json',
         );
-
         if (res.ok) {
             const data = await res.json();
             allAirports.value = data.filter(
@@ -45,12 +44,8 @@ onMounted(async () => {
 });
 
 const getCityName = (code: string) => {
-    if (!allAirports.value.length) {
-        return '';
-    }
-
+    if (!allAirports.value.length) return '';
     const airport = allAirports.value.find((a: any) => a.code === code);
-
     return airport ? airport.name : '';
 };
 
@@ -61,29 +56,19 @@ const filteredBookings = computed(() => {
             if (
                 statusFilter.value === 'awaiting_payment' &&
                 booking.status !== 'draft'
-            ) {
+            )
                 return false;
-            }
-
-            if (
-                statusFilter.value === 'upcoming' &&
-                booking.status !== 'paid'
-            ) {
+            if (statusFilter.value === 'upcoming' && booking.status !== 'paid')
                 return false;
-            }
-
-            if (statusFilter.value === 'flown' && booking.status !== 'used') {
+            if (statusFilter.value === 'flown' && booking.status !== 'used')
                 return false;
-            }
-
             if (
                 statusFilter.value === 'cancelled' &&
                 !['refunded', 'cancelled', 'refund_requested'].includes(
                     booking.status,
                 )
-            ) {
+            )
                 return false;
-            }
         }
 
         if (searchQuery.value) {
@@ -97,11 +82,13 @@ const filteredBookings = computed(() => {
             const destMatch = (booking.flight.destination_airport || '')
                 .toLowerCase()
                 .includes(q);
-            const airlineMatch = (
-                booking.flight.airline_name ||
-                booking.flight.airline_code ||
-                ''
-            )
+
+            // 👇 UPDATE LOGIKA SEARCH AIRLINE
+            const mainAirlineName =
+                booking.flight.segments?.[0]?.airlineData?.name || '';
+            const mainAirlineCode =
+                booking.flight.segments?.[0]?.airline_code || '';
+            const airlineMatch = (mainAirlineName || mainAirlineCode)
                 .toLowerCase()
                 .includes(q);
 
@@ -116,7 +103,6 @@ const filteredBookings = computed(() => {
 
 const paginatedBookings = computed(() => {
     const start = (currentPage.value - 1) * itemsPerPage;
-
     return filteredBookings.value.slice(start, start + itemsPerPage);
 });
 
@@ -126,10 +112,7 @@ const totalPages = computed(() =>
 
 // --- 3. FORMATTERS ---
 const formatDate = (dateString: string) => {
-    if (!dateString) {
-        return '-';
-    }
-
+    if (!dateString) return '-';
     return new Date(dateString).toLocaleDateString('en-US', {
         day: 'numeric',
         month: 'short',
@@ -138,10 +121,7 @@ const formatDate = (dateString: string) => {
 };
 
 const formatTime = (dateString: string) => {
-    if (!dateString) {
-        return '--:--';
-    }
-
+    if (!dateString) return '--:--';
     return new Date(dateString).toLocaleTimeString('en-US', {
         hour: '2-digit',
         minute: '2-digit',
@@ -149,10 +129,7 @@ const formatTime = (dateString: string) => {
 };
 
 const formatDateTime = (dateString: string) => {
-    if (!dateString) {
-        return '-';
-    }
-
+    if (!dateString) return '-';
     return new Date(dateString).toLocaleString('en-US', {
         day: 'numeric',
         month: 'short',
@@ -163,14 +140,10 @@ const formatDateTime = (dateString: string) => {
 };
 
 const calculateDuration = (departure: string, arrival: string) => {
-    if (!departure || !arrival) {
-        return '-';
-    }
-
+    if (!departure || !arrival) return '-';
     const diffMs = new Date(arrival).getTime() - new Date(departure).getTime();
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
     const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-
     return diffHrs === 0 ? `${diffMins}m` : `${diffHrs}h ${diffMins}m`;
 };
 
@@ -179,6 +152,18 @@ const formatCurrency = (value: number) => {
         style: 'currency',
         currency: 'USD',
     }).format(value);
+};
+
+// --- HELPER SEATS ---
+const formatSeats = (seatsJson: any) => {
+    if (!seatsJson) return 'TBA';
+    // Menghandle data yang mungkin masih string JSON dari database
+    const parsedSeats =
+        typeof seatsJson === 'string' ? JSON.parse(seatsJson) : seatsJson;
+    if (typeof parsedSeats === 'object' && parsedSeats !== null) {
+        return Object.values(parsedSeats).join(', ');
+    }
+    return 'TBA';
 };
 
 // --- 4. MODAL HANDLERS ---
@@ -298,6 +283,7 @@ const closeSummaryModal = () => {
                         ></a
                     >
                 </div>
+
                 <div
                     v-else-if="filteredBookings.length === 0"
                     class="rounded-2xl border border-border bg-card py-16 text-center shadow-sm"
@@ -334,8 +320,10 @@ const closeSummaryModal = () => {
                                         class="rounded-md bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary uppercase"
                                     >
                                         {{
-                                            booking.flight.airline_name ||
-                                            booking.flight.airline_code
+                                            booking.flight.segments?.[0]
+                                                ?.airlineData?.name ||
+                                            booking.flight.segments?.[0]
+                                                ?.airline_code
                                         }}
                                     </span>
                                     <span
@@ -346,14 +334,7 @@ const closeSummaryModal = () => {
                                             booking.pnr_code || 'PENDING'
                                         }}</span>
                                     </span>
-                                    <span
-                                        class="hidden text-[10px] text-muted-foreground sm:inline-block"
-                                    >
-                                        • Booked:
-                                        {{ formatDate(booking.created_at) }}
-                                    </span>
                                 </div>
-
                                 <div>
                                     <span
                                         v-if="booking.status === 'paid'"
@@ -428,10 +409,7 @@ const closeSummaryModal = () => {
                                     class="flex flex-1 flex-col items-center px-2"
                                 >
                                     <span
-                                        v-if="
-                                            !booking.flight.transits ||
-                                            booking.flight.transits.length === 0
-                                        "
+                                        v-if="booking.flight.stop_count === 0"
                                         class="mb-1 text-[10px] font-bold tracking-widest text-emerald-500 uppercase"
                                         >Direct</span
                                     >
@@ -760,7 +738,6 @@ const closeSummaryModal = () => {
                                     {{ activeBooking.pnr_code }}
                                 </p>
                             </div>
-
                             <div
                                 v-if="activeBooking.return_booking?.qr_token"
                                 class="text-center"
@@ -802,25 +779,31 @@ const closeSummaryModal = () => {
                                 <span
                                     class="text-sm font-bold text-foreground"
                                     >{{
-                                        activeBooking.flight.airline_name ||
-                                        activeBooking.flight.airline_code
+                                        activeBooking.flight.segments?.[0]
+                                            ?.airlineData?.name ||
+                                        activeBooking.flight.segments?.[0]
+                                            ?.airline_code
                                     }}</span
                                 >
                                 <span
                                     class="text-[10px] text-muted-foreground uppercase"
                                     >{{
-                                        activeBooking.flight.aircraft
-                                            ?.model_name || 'Aircraft TBA'
+                                        activeBooking.flight.segments?.[0]
+                                            ?.aircraft?.model_name ||
+                                        'Aircraft TBA'
                                     }}</span
                                 >
                             </div>
                             <span
                                 class="rounded border border-border bg-background px-2 py-1 font-mono text-xs font-bold"
+                                >{{
+                                    activeBooking.flight.segments?.[0]
+                                        ?.airline_code
+                                }}-{{
+                                    activeBooking.flight.segments?.[0]
+                                        ?.flight_number
+                                }}</span
                             >
-                                {{ activeBooking.flight.airline_code }}-{{
-                                    activeBooking.flight.flight_number
-                                }}
-                            </span>
                         </div>
 
                         <div class="mb-3 flex items-center justify-between">
@@ -851,9 +834,8 @@ const closeSummaryModal = () => {
                             <div class="flex flex-1 flex-col items-center px-2">
                                 <span
                                     v-if="
-                                        !activeBooking.flight.transits ||
-                                        activeBooking.flight.transits.length ===
-                                            0
+                                        !activeBooking.flight.stop_count ||
+                                        activeBooking.flight.stop_count === 0
                                     "
                                     class="mb-1 text-[10px] font-bold tracking-widest text-emerald-500 uppercase"
                                     >Direct</span
@@ -922,32 +904,49 @@ const closeSummaryModal = () => {
                         </div>
 
                         <div
-                            v-if="activeBooking.flight.stop_count > 0"
+                            v-if="
+                                activeBooking.flight.stop_count > 0 &&
+                                activeBooking.flight.segments
+                            "
                             class="mt-2 text-center text-[10px] font-medium text-amber-600"
                         >
                             via
                             {{
-                                activeBooking.flight.transits
-                                    ?.map((t: any) => t.airport)
+                                activeBooking.flight.segments
+                                    .slice(0, -1)
+                                    .map(
+                                        (t: any) =>
+                                            getCityName(
+                                                t.destination_airport,
+                                            ) || t.destination_airport,
+                                    )
                                     .join(', ')
                             }}
                         </div>
+
                         <div
                             class="mt-3 flex flex-wrap justify-center gap-1.5 border-t border-border/50 pt-3"
                         >
                             <span
-                                v-if="activeBooking.flight.facilities?.meal"
+                                v-if="
+                                    activeBooking.flight.segments?.[0]
+                                        ?.classes?.[0]?.facilities?.meal
+                                "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
                                 >🍱 Meal</span
                             >
                             <span
-                                v-if="activeBooking.flight.facilities?.wifi"
+                                v-if="
+                                    activeBooking.flight.segments?.[0]
+                                        ?.classes?.[0]?.facilities?.wifi
+                                "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
                                 >📶 WiFi</span
                             >
                             <span
                                 v-if="
-                                    activeBooking.flight.facilities
+                                    activeBooking.flight.segments?.[0]
+                                        ?.classes?.[0]?.facilities
                                         ?.entertainment
                                 "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
@@ -955,7 +954,8 @@ const closeSummaryModal = () => {
                             >
                             <span
                                 v-if="
-                                    activeBooking.flight.facilities?.power_usb
+                                    activeBooking.flight.segments?.[0]
+                                        ?.classes?.[0]?.facilities?.power_usb
                                 "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
                                 >🔌 USB</span
@@ -979,31 +979,30 @@ const closeSummaryModal = () => {
                                     class="text-sm font-bold text-foreground"
                                     >{{
                                         activeBooking.return_booking.flight
-                                            .airline_name ||
+                                            .segments?.[0]?.airlineData?.name ||
                                         activeBooking.return_booking.flight
-                                            .airline_code
+                                            .segments?.[0]?.airline_code
                                     }}</span
                                 >
                                 <span
                                     class="text-[10px] text-muted-foreground uppercase"
                                     >{{
                                         activeBooking.return_booking.flight
-                                            .aircraft?.model_name ||
-                                        'Aircraft TBA'
+                                            .segments?.[0]?.aircraft
+                                            ?.model_name || 'Aircraft TBA'
                                     }}</span
                                 >
                             </div>
                             <span
                                 class="rounded border border-border bg-background px-2 py-1 font-mono text-xs font-bold"
-                            >
-                                {{
+                                >{{
                                     activeBooking.return_booking.flight
-                                        .airline_code
+                                        .segments?.[0]?.airline_code
                                 }}-{{
                                     activeBooking.return_booking.flight
-                                        .flight_number
-                                }}
-                            </span>
+                                        .segments?.[0]?.flight_number
+                                }}</span
+                            >
                         </div>
 
                         <div class="mb-3 flex items-center justify-between">
@@ -1038,9 +1037,9 @@ const closeSummaryModal = () => {
                                 <span
                                     v-if="
                                         !activeBooking.return_booking.flight
-                                            .transits ||
+                                            .stop_count ||
                                         activeBooking.return_booking.flight
-                                            .transits.length === 0
+                                            .stop_count === 0
                                     "
                                     class="mb-1 text-[10px] font-bold tracking-widest text-emerald-500 uppercase"
                                     >Direct</span
@@ -1116,14 +1115,21 @@ const closeSummaryModal = () => {
                         <div
                             v-if="
                                 activeBooking.return_booking.flight.stop_count >
-                                0
+                                    0 &&
+                                activeBooking.return_booking.flight.segments
                             "
                             class="mt-2 text-center text-[10px] font-medium text-amber-600"
                         >
                             via
                             {{
-                                activeBooking.return_booking.flight.transits
-                                    ?.map((t: any) => t.airport)
+                                activeBooking.return_booking.flight.segments
+                                    .slice(0, -1)
+                                    .map(
+                                        (t: any) =>
+                                            getCityName(
+                                                t.destination_airport,
+                                            ) || t.destination_airport,
+                                    )
                                     .join(', ')
                             }}
                         </div>
@@ -1133,7 +1139,8 @@ const closeSummaryModal = () => {
                             <span
                                 v-if="
                                     activeBooking.return_booking.flight
-                                        .facilities?.meal
+                                        .segments?.[0]?.classes?.[0]?.facilities
+                                        ?.meal
                                 "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
                                 >🍱 Meal</span
@@ -1141,7 +1148,8 @@ const closeSummaryModal = () => {
                             <span
                                 v-if="
                                     activeBooking.return_booking.flight
-                                        .facilities?.wifi
+                                        .segments?.[0]?.classes?.[0]?.facilities
+                                        ?.wifi
                                 "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
                                 >📶 WiFi</span
@@ -1149,7 +1157,8 @@ const closeSummaryModal = () => {
                             <span
                                 v-if="
                                     activeBooking.return_booking.flight
-                                        .facilities?.entertainment
+                                        .segments?.[0]?.classes?.[0]?.facilities
+                                        ?.entertainment
                                 "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
                                 >🎬 Screen</span
@@ -1157,7 +1166,8 @@ const closeSummaryModal = () => {
                             <span
                                 v-if="
                                     activeBooking.return_booking.flight
-                                        .facilities?.power_usb
+                                        .segments?.[0]?.classes?.[0]?.facilities
+                                        ?.power_usb
                                 "
                                 class="rounded border border-border bg-background px-1.5 py-0.5 text-[9px]"
                                 >🔌 USB</span
@@ -1194,18 +1204,24 @@ const closeSummaryModal = () => {
                                 >
                                     <span
                                         class="block font-mono text-xs font-bold text-emerald-600"
-                                        >🛫 {{ pax.seat_code }}</span
+                                        >🛫
+                                        {{
+                                            formatSeats(pax.assigned_seats)
+                                        }}</span
                                     >
                                     <span
                                         v-if="activeBooking.return_booking"
                                         class="mt-1 block border-t border-border/50 pt-1 font-mono text-xs font-bold text-blue-600"
-                                        >🛬
-                                        {{
-                                            activeBooking.return_booking
-                                                .passengers[idx]?.seat_code ||
-                                            '-'
-                                        }}</span
                                     >
+                                        🛬
+                                        {{
+                                            formatSeats(
+                                                activeBooking.return_booking
+                                                    .passengers[idx]
+                                                    ?.assigned_seats,
+                                            )
+                                        }}
+                                    </span>
                                 </div>
                             </div>
 
@@ -1221,7 +1237,8 @@ const closeSummaryModal = () => {
                                         <span class="font-bold text-foreground"
                                             >{{
                                                 activeBooking.flight
-                                                    .cabin_baggage_kg
+                                                    .segments?.[0]?.classes?.[0]
+                                                    ?.cabin_baggage_kg || 7
                                             }}
                                             KG</span
                                         ></span
@@ -1231,7 +1248,8 @@ const closeSummaryModal = () => {
                                         <span class="font-bold text-foreground"
                                             >{{
                                                 activeBooking.flight
-                                                    .free_baggage_kg
+                                                    .segments?.[0]?.classes?.[0]
+                                                    ?.free_baggage_kg || 20
                                             }}
                                             KG</span
                                         ></span

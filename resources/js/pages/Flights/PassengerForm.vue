@@ -83,6 +83,7 @@ const removePassenger = (index) => {
 
 // --- HELPER BAGGAGE DINAMIS ---
 // Susun opsi bagasi gabungan (Default maskapai + DEFAULT general)
+// --- HELPER BAGGAGE DINAMIS ---
 const baggageOptions = computed(() => {
     const options = [
         {
@@ -92,11 +93,12 @@ const baggageOptions = computed(() => {
         },
     ];
 
-    // Filter addon berdasarkan maskapai (atau fallback ke DEFAULT)
+    // Gunakan airline_code dari segmen pertama
+    const mainAirline =
+        props.outbound_flight.segments?.[0]?.airline_code || 'DEFAULT';
+
     const validAddons = props.baggage_addons.filter(
-        (b) =>
-            b.airline_code === props.outbound_flight.airline_code ||
-            b.airline_code === 'DEFAULT',
+        (b) => b.airline_code === mainAirline || b.airline_code === 'DEFAULT',
     );
 
     // Hilangkan duplikat weight jika maskapai punya addon khusus yang sama beratnya dengan DEFAULT
@@ -132,10 +134,10 @@ const updateBaggageFee = (passenger) => {
 
 // --- HELPER PERHITUNGAN HARGA ---
 const basePricePerPerson = computed(() => {
-    let price = Number(props.outbound_flight.base_price_usd);
+    let price = Number(props.outbound_flight.starting_price || 0);
 
     if (props.trip_type === 'round_trip' && props.return_flight) {
-        price += Number(props.return_flight.base_price_usd);
+        price += Number(props.return_flight.starting_price || 0);
     }
 
     return price;
@@ -357,7 +359,10 @@ const isFormValid = computed(() => {
                                             >
                                                 🎒 Cabin:
                                                 {{
-                                                    outbound_flight.cabin_baggage_kg
+                                                    outbound_flight
+                                                        .segments?.[0]
+                                                        ?.classes?.[0]
+                                                        ?.cabin_baggage_kg || 7
                                                 }}
                                                 KG
                                             </span>
@@ -366,7 +371,10 @@ const isFormValid = computed(() => {
                                             >
                                                 🧳 Checked:
                                                 {{
-                                                    outbound_flight.free_baggage_kg
+                                                    outbound_flight
+                                                        .segments?.[0]
+                                                        ?.classes?.[0]
+                                                        ?.free_baggage_kg || 20
                                                 }}
                                                 KG
                                             </span>
@@ -428,8 +436,9 @@ const isFormValid = computed(() => {
                             </p>
                             <span class="font-mono text-[10px] font-bold">{{
                                 displayFlightNumber(
-                                    outbound_flight.airline_code,
-                                    outbound_flight.flight_number,
+                                    outbound_flight.segments?.[0]?.airline_code,
+                                    outbound_flight.segments?.[0]
+                                        ?.flight_number,
                                 )
                             }}</span>
                         </div>
@@ -439,15 +448,15 @@ const isFormValid = computed(() => {
                         >
                             <div class="flex flex-col">
                                 <span class="text-sm font-bold">{{
-                                    outbound_flight.airline_info?.name ||
-                                    outbound_flight.airline_name ||
-                                    outbound_flight.airline_code
+                                    outbound_flight.segments?.[0]?.airline_info
+                                        ?.name ||
+                                    outbound_flight.segments?.[0]?.airline_code
                                 }}</span>
                                 <span
                                     class="text-[10px] text-muted-foreground"
                                     >{{
-                                        outbound_flight.aircraft?.model_name ||
-                                        'Aircraft TBA'
+                                        outbound_flight.segments?.[0]?.aircraft
+                                            ?.model_name || 'Aircraft TBA'
                                     }}</span
                                 >
                             </div>
@@ -540,7 +549,11 @@ const isFormValid = computed(() => {
                         </div>
 
                         <div
-                            v-if="outbound_flight.stop_count > 0"
+                            v-if="
+                                outbound_flight.stop_count > 0 &&
+                                outbound_flight.segments &&
+                                outbound_flight.segments.length > 1
+                            "
                             class="mb-3 rounded border border-border bg-background p-2 text-[10px]"
                         >
                             <p class="mb-1 font-bold text-muted-foreground">
@@ -548,25 +561,26 @@ const isFormValid = computed(() => {
                             </p>
                             <div
                                 v-for="(
-                                    transit, idx
-                                ) in outbound_flight.transits"
-                                :key="idx"
+                                    seg, idx
+                                ) in outbound_flight.segments.slice(0, -1)"
+                                :key="'out_transit_' + idx"
                                 class="flex items-center justify-between text-foreground"
                             >
-                                <span
-                                    >Layover at
+                                <span>
+                                    Layover at
                                     <span class="font-bold">{{
-                                        transit.airport
-                                    }}</span></span
-                                >
-                                <span class="font-mono text-amber-600"
-                                    >{{
-                                        Math.floor(
-                                            transit.duration_minutes / 60,
+                                        seg.destination_airport
+                                    }}</span>
+                                </span>
+                                <span class="font-mono text-amber-600">
+                                    {{
+                                        calculateDuration(
+                                            seg.arrival_at,
+                                            outbound_flight.segments[idx + 1]
+                                                .departure_at,
                                         )
-                                    }}h
-                                    {{ transit.duration_minutes % 60 }}m</span
-                                >
+                                    }}
+                                </span>
                             </div>
                         </div>
 
@@ -626,8 +640,8 @@ const isFormValid = computed(() => {
                             </p>
                             <span class="font-mono text-[10px] font-bold">{{
                                 displayFlightNumber(
-                                    return_flight.airline_code,
-                                    return_flight.flight_number,
+                                    return_flight.segments?.[0]?.airline_code,
+                                    return_flight.segments?.[0]?.flight_number,
                                 )
                             }}</span>
                         </div>
@@ -637,15 +651,15 @@ const isFormValid = computed(() => {
                         >
                             <div class="flex flex-col">
                                 <span class="text-sm font-bold">{{
-                                    return_flight.airline_info?.name ||
-                                    return_flight.airline_name ||
-                                    return_flight.airline_code
+                                    return_flight.segments?.[0]?.airlineData
+                                        ?.name ||
+                                    return_flight.segments?.[0]?.airline_code
                                 }}</span>
                                 <span
                                     class="text-[10px] text-muted-foreground"
                                     >{{
-                                        return_flight.aircraft?.model_name ||
-                                        'Aircraft TBA'
+                                        return_flight.segments?.[0]?.aircraft
+                                            ?.model_name || 'Aircraft TBA'
                                     }}</span
                                 >
                             </div>
@@ -738,31 +752,38 @@ const isFormValid = computed(() => {
                         </div>
 
                         <div
-                            v-if="return_flight.stop_count > 0"
+                            v-if="
+                                return_flight.stop_count > 0 &&
+                                return_flight.segments &&
+                                return_flight.segments.length > 1
+                            "
                             class="mb-3 rounded border border-border bg-background p-2 text-[10px]"
                         >
                             <p class="mb-1 font-bold text-muted-foreground">
                                 Transit Details:
                             </p>
                             <div
-                                v-for="(transit, idx) in return_flight.transits"
-                                :key="idx"
+                                v-for="(
+                                    seg, idx
+                                ) in return_flight.segments.slice(0, -1)"
+                                :key="'ret_transit_' + idx"
                                 class="flex items-center justify-between text-foreground"
                             >
-                                <span
-                                    >Layover at
+                                <span>
+                                    Layover at
                                     <span class="font-bold">{{
-                                        transit.airport
-                                    }}</span></span
-                                >
-                                <span class="font-mono text-amber-600"
-                                    >{{
-                                        Math.floor(
-                                            transit.duration_minutes / 60,
+                                        seg.destination_airport
+                                    }}</span>
+                                </span>
+                                <span class="font-mono text-amber-600">
+                                    {{
+                                        calculateDuration(
+                                            seg.arrival_at,
+                                            return_flight.segments[idx + 1]
+                                                .departure_at,
                                         )
-                                    }}h
-                                    {{ transit.duration_minutes % 60 }}m</span
-                                >
+                                    }}
+                                </span>
                             </div>
                         </div>
 

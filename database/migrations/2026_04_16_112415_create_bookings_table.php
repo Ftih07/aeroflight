@@ -9,9 +9,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('bookings', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('parent_booking_id')->nullable()->constrained('bookings')->onDelete('set null'); // Untuk Round-trip
-            $table->foreignId('rescheduled_from_id')->nullable()->constrained('bookings')->onDelete('set null');
+            $table->uuid('id')->primary();
+            $table->foreignUuid('parent_booking_id')->nullable()->constrained('bookings')->onDelete('set null'); // Untuk Round-trip
+            $table->foreignUuid('rescheduled_from_id')->nullable()->constrained('bookings')->onDelete('set null');
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('flight_id')->constrained()->cascadeOnDelete();
             $table->string('pnr_code')->unique()->nullable();

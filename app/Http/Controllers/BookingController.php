@@ -12,50 +12,36 @@ use Illuminate\Support\Facades\Http;
 
 class BookingController extends Controller
 {
-public function history(Request $request)
+    public function history(Request $request)
     {
         $userId = Auth::id();
 
-        // 1. Ambil data booking berserta relasinya (TAMBAHIN flight.aircraft dan passengers)
-        $bookings = Booking::with(['flight.aircraft', 'transactions', 'passengers'])
+        // 1. Ambil data booking berserta relasinya
+        $bookings = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'flight.segments.classes', 'transactions', 'passengers'])
             ->withCount('passengers')
             ->where('user_id', $userId)
             ->whereNull('parent_booking_id') // Hanya ambil Outbound
             ->orderBy('created_at', 'desc')
             ->get();
 
-        // 2. Ambil SEMUA child bookings yang nyambung ke parent di atas (TAMBAHIN flight.aircraft)
+        // 2. Ambil SEMUA child bookings yang nyambung ke parent di atas
         $parentIds = $bookings->pluck('id');
-        $childBookings = Booking::with(['flight.aircraft', 'passengers'])
+        $childBookings = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'flight.segments.classes', 'passengers'])
             ->whereIn('parent_booking_id', $parentIds)
             ->get()
             ->keyBy('parent_booking_id');
 
-        // 3. Terjemahkan Kode Maskapai pakai Cache
-        $airlinesMap = Cache::remember('openflights_airlines', 86400, function () {
-            $response = Http::withoutVerifying()->get('https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat');
-            $map = [];
-            if ($response->successful()) {
-                foreach (explode("\n", $response->body()) as $line) {
-                    $cols = str_getcsv($line);
-                    if (count($cols) > 3 && !empty($cols[3]) && $cols[3] !== '\N' && $cols[3] !== '-') {
-                        $map[$cols[3]] = $cols[1];
-                    }
-                }
-            }
-            return $map;
-        });
-
-        // 4. Looping dan gabungin parent + child
-        $bookings->map(function ($booking) use ($airlinesMap, $childBookings) {
+        // 3. Looping dan gabungin parent + child
+        $bookings->map(function ($booking) use ($childBookings) {
+            // Append starting_price agar terbaca di Vue
             if ($booking->flight) {
-                $booking->flight->airline_name = $airlinesMap[$booking->flight->airline_code] ?? $booking->flight->airline_code;
+                $booking->flight->append('starting_price');
             }
 
             if (isset($childBookings[$booking->id])) {
                 $child = $childBookings[$booking->id];
                 if ($child->flight) {
-                    $child->flight->airline_name = $airlinesMap[$child->flight->airline_code] ?? $child->flight->airline_code;
+                    $child->flight->append('starting_price');
                 }
                 $booking->return_booking = $child;
             } else {
@@ -70,21 +56,13 @@ public function history(Request $request)
 
     public function downloadTicket(Booking $booking)
     {
-        $booking->load(['flight.aircraft', 'passengers']);
+        // ... (KODE FUNGSI INI TETAP SAMA SEPERTI YANG SUDAH SAYA BERIKAN SEBELUMNYA) ...
+        $booking->load(['flight.segments.aircraft', 'flight.segments.classes', 'flight.segments.airlineData', 'passengers']);
 
-        // Cari tiket pulang kalau ini adalah tiket berangkat (Parent)
-        $childBooking = Booking::with(['flight.aircraft', 'passengers'])
+        $childBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.classes', 'flight.segments.airlineData', 'passengers'])
             ->where('parent_booking_id', $booking->id)
             ->first();
 
-        // Ambil Data Maskapai
-        $airlinesMap = Cache::get('openflights_airlines', []);
-        $booking->flight->airline_name = $airlinesMap[$booking->flight->airline_code] ?? $booking->flight->airline_code;
-        if ($childBooking) {
-            $childBooking->flight->airline_name = $airlinesMap[$childBooking->flight->airline_code] ?? $childBooking->flight->airline_code;
-        }
-
-        // 👇 TAMBAHAN: Ambil Cache Nama Kota Bandara (Sama seperti di Success)
         $airportsMap = Cache::remember('airports_data_map', 86400, function () {
             $response = Http::withoutVerifying()->get('https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json');
             $map = [];
@@ -98,7 +76,6 @@ public function history(Request $request)
             return $map;
         });
 
-        // 👇 SUNTIK DATA KOTA KE FLIGHT
         $booking->flight->origin_city = $airportsMap[$booking->flight->origin_airport] ?? 'CITY N/A';
         $booking->flight->destination_city = $airportsMap[$booking->flight->destination_airport] ?? 'CITY N/A';
 
@@ -107,7 +84,6 @@ public function history(Request $request)
             $childBooking->flight->destination_city = $airportsMap[$childBooking->flight->destination_airport] ?? 'CITY N/A';
         }
 
-        // Render PDF
         $pdf = Pdf::setOption(['isRemoteEnabled' => true])->loadView('emails.ticket', [
             'booking' => $booking,
             'child_booking' => $childBooking

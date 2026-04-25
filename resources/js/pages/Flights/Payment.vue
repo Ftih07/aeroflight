@@ -9,8 +9,8 @@ import AeroLayout from '@/layouts/AeroLayout.vue';
 defineOptions({ layout: null });
 
 const props = defineProps({
-    flight: Object, // Outbound Flight
-    return_flight: Object, // Return Flight
+    flight: Object,
+    return_flight: Object,
     booking: Object,
     grandTotal: Number,
     isRoundTrip: Boolean,
@@ -24,6 +24,36 @@ const errorMessage = ref('');
 let stripe = null;
 let elements = null;
 
+// --- HELPER NAMA KOTA BANDARA ---
+const allAirports = ref([]);
+
+onMounted(async () => {
+    try {
+        const resAirports = await fetch(
+            'https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json',
+        );
+
+        if (resAirports.ok) {
+            const dataAirports = await resAirports.json();
+            allAirports.value = dataAirports.filter(
+                (a) => a.code && a.code.trim() !== '',
+            );
+        }
+    } catch (error) {
+        console.error('Gagal mengambil data bandara:', error);
+    }
+});
+
+const getCityName = (code) => {
+    if (!allAirports.value || allAirports.value.length === 0) {
+        return '';
+    }
+
+    const airport = allAirports.value.find((a) => a.code === code);
+
+    return airport ? airport.name : '';
+};
+
 // --- CALCULATIONS UNTUK RINCIAN HARGA ---
 const baggageTotal = computed(() => {
     return props.booking.passengers.reduce(
@@ -32,14 +62,15 @@ const baggageTotal = computed(() => {
     );
 });
 
-// Harga kursi dari tabel relasi (Asumsi seat prices udah terintegrasi di booking_amount sebelumnya)
+// Harga dasar sekarang merujuk ke atribut starting_price yang di-append di Controller
 const baseFlightTotal = computed(() => {
     let flightSum =
-        Number(props.flight.base_price_usd) * props.booking.passengers.length;
+        Number(props.flight.starting_price || 0) *
+        props.booking.passengers.length;
 
     if (props.isRoundTrip && props.return_flight) {
         flightSum +=
-            Number(props.return_flight.base_price_usd) *
+            Number(props.return_flight.starting_price || 0) *
             props.booking.passengers.length;
     }
 
@@ -49,7 +80,7 @@ const baseFlightTotal = computed(() => {
 const seatUpgradeTotal = computed(() => {
     // Sisa dari grandTotal - (base + baggage)
     const currentGrand = props.grandTotal || props.booking.total_amount_usd;
-
+    
     return currentGrand - baseFlightTotal.value - baggageTotal.value;
 });
 
@@ -217,8 +248,8 @@ const submitPayment = async () => {
                             >
                             <span class="font-mono text-xs font-bold">{{
                                 displayFlightNumber(
-                                    flight.airline_code,
-                                    flight.flight_number,
+                                    flight.segments?.[0]?.airline_code,
+                                    flight.segments?.[0]?.flight_number,
                                 )
                             }}</span>
                         </div>
@@ -236,7 +267,10 @@ const submitPayment = async () => {
                             </div>
                             <div class="flex flex-col items-center px-2">
                                 <span
-                                    v-if="flight.stop_count === 0"
+                                    v-if="
+                                        !flight.stop_count ||
+                                        flight.stop_count === 0
+                                    "
                                     class="text-[10px] font-bold text-emerald-500 uppercase"
                                     >Direct</span
                                 >
@@ -292,9 +326,15 @@ const submitPayment = async () => {
                         >
                             via
                             {{
-                                flight.transits
-                                    ?.map((t) => t.airport)
-                                    .join(', ')
+                                flight.segments
+                                    ?.slice(0, -1)
+                                    ?.map(
+                                        (seg) =>
+                                            getCityName(
+                                                seg.destination_airport,
+                                            ) || seg.destination_airport,
+                                    )
+                                    ?.join(', ')
                             }}
                         </div>
                     </div>
@@ -315,8 +355,8 @@ const submitPayment = async () => {
                             >
                             <span class="font-mono text-xs font-bold">{{
                                 displayFlightNumber(
-                                    return_flight.airline_code,
-                                    return_flight.flight_number,
+                                    return_flight.segments?.[0]?.airline_code,
+                                    return_flight.segments?.[0]?.flight_number,
                                 )
                             }}</span>
                         </div>
@@ -336,7 +376,10 @@ const submitPayment = async () => {
                             </div>
                             <div class="flex flex-col items-center px-2">
                                 <span
-                                    v-if="return_flight.stop_count === 0"
+                                    v-if="
+                                        !return_flight.stop_count ||
+                                        return_flight.stop_count === 0
+                                    "
                                     class="text-[10px] font-bold text-emerald-500 uppercase"
                                     >Direct</span
                                 >
@@ -399,9 +442,15 @@ const submitPayment = async () => {
                         >
                             via
                             {{
-                                return_flight.transits
-                                    ?.map((t) => t.airport)
-                                    .join(', ')
+                                return_flight.segments
+                                    ?.slice(0, -1)
+                                    ?.map(
+                                        (seg) =>
+                                            getCityName(
+                                                seg.destination_airport,
+                                            ) || seg.destination_airport,
+                                    )
+                                    ?.join(', ')
                             }}
                         </div>
                     </div>

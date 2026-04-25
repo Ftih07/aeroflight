@@ -21,68 +21,80 @@ use Carbon\Carbon;
 
 class CheckoutController extends Controller
 {
-    // --- HELPER: SIMPAN TIKET DUFFEL KE LOKAL ---
+    // --- HELPER: SIMPAN TIKET DUFFEL KE LOKAL DENGAN SEGMENTS & CLASSES ---
     private function ensureFlightExists($flightId, $externalData)
     {
-        // Kalau flightId berupa angka dan bukan dari duffel, langsung return dari DB
         if (!$externalData) {
-            return Flight::findOrFail($flightId);
+            return Flight::with(['segments.classes', 'segments.aircraft'])->findOrFail($flightId);
         }
 
-        // Kalau dari Duffel, simpan atau update ke database lokal
-        return Flight::updateOrCreate(
+        $flight = Flight::firstOrCreate(
             [
                 'provider' => 'duffel',
-                // Pastikan dia mencari menggunakan Stable ID yang dilempar dari frontend
                 'provider_flight_id' => $externalData['provider_flight_id']
             ],
             [
-                'airline_code' => $externalData['airline_code'],
-                'flight_number' => $externalData['flight_number'],
                 'origin_airport' => $externalData['origin_airport'],
                 'destination_airport' => $externalData['destination_airport'],
                 'departure_at' => Carbon::parse($externalData['departure_at'])->format('Y-m-d H:i:s'),
                 'arrival_at' => Carbon::parse($externalData['arrival_at'])->format('Y-m-d H:i:s'),
-                'base_price_usd' => $externalData['base_price_usd'],
-                'free_baggage_kg' => $externalData['free_baggage_kg'] ?? 20,
-                'cabin_baggage_kg' => $externalData['cabin_baggage_kg'] ?? 7,
-                'stop_count' => $externalData['stop_count'] ?? count($externalData['transits'] ?? []),
-                'transits' => $externalData['transits'] ?? [],
-                'facilities' => $externalData['facilities'],
-                'is_refundable' => $externalData['is_refundable'],
-                'is_reschedulable' => $externalData['is_reschedulable'],
-                'seat_prices' => $externalData['seat_prices'],
-                'aircraft_id' => $externalData['aircraft_id'] ?? 1,
+                'stop_count' => $externalData['stop_count'] ?? 0,
+                'is_refundable' => $externalData['is_refundable'] ?? false,
+                'is_reschedulable' => $externalData['is_reschedulable'] ?? false,
             ]
         );
+
+        if ($flight->wasRecentlyCreated && !empty($externalData['segments'])) {
+            foreach ($externalData['segments'] as $segData) {
+                $segment = $flight->segments()->create([
+                    'aircraft_id' => $segData['aircraft_id'] ?? 1, // Fallback ID jika tidak ada
+                    'airline_code' => $segData['airline_code'],
+                    'flight_number' => $segData['flight_number'],
+                    'origin_airport' => $segData['origin_airport'],
+                    'destination_airport' => $segData['destination_airport'],
+                    'departure_at' => Carbon::parse($segData['departure_at'])->format('Y-m-d H:i:s'),
+                    'arrival_at' => Carbon::parse($segData['arrival_at'])->format('Y-m-d H:i:s'),
+                    'segment_order' => $segData['segment_order'] ?? 1,
+                ]);
+
+                // Simpan kelas ke dalam segmen tersebut
+                if (!empty($segData['classes'])) {
+                    foreach ($segData['classes'] as $clsData) {
+                        $segment->classes()->create([
+                            'class_type' => $clsData['class_type'],
+                            'base_price_usd' => $clsData['base_price_usd'],
+                            'facilities' => $clsData['facilities'] ?? [],
+                            'cabin_baggage_kg' => $clsData['cabin_baggage_kg'] ?? 7,
+                            'free_baggage_kg' => $clsData['free_baggage_kg'] ?? 20,
+                        ]);
+                    }
+                }
+            }
+        }
+
+        return $flight->load(['segments.classes', 'segments.aircraft']);
     }
 
-    // --- HELPER: GENERATE SEAT MAP ---
-    private function generateSeatMap($flight)
+    // --- HELPER: GENERATE SEAT MAP (PER SEGMENT) ---
+    private function generateSeatMap($segment)
     {
-        // 1. Amankan Layout Data (Ubah string JSON ke Array kalau perlu)
-        $layoutData = $flight->aircraft->seat_layout ?? ["config" => "3-3", "rows" => 10, "business_rows" => 2];
+        $layoutData = $segment->aircraft->seat_layout ?? ["config" => "3-3", "rows" => 10, "business_rows" => 2];
         if (is_string($layoutData)) {
             $layoutData = json_decode($layoutData, true);
         }
 
-        $bookedSeats = $flight->seats->pluck('seat_code')->toArray();
+        $bookedSeats = \App\Models\Seat::where('flight_segment_id', $segment->id)
+            ->whereIn('status', ['booked', 'blocked'])
+            ->pluck('seat_code')
+            ->toArray();
+
+        $classes = $segment->classes->keyBy('class_type');
+
         $groupedSeats = [];
         $columns = explode('-', $layoutData['config']);
         $totalSeatsPerRow = array_sum($columns);
         $alphabet = range('A', 'Z');
         $exitRows = $layoutData['exit_rows'] ?? [];
-
-        // 2. Amankan Seat Prices (INI BIANG KEROKNYA KEMARIN)
-        $prices = $flight->seat_prices;
-        if (is_string($prices)) {
-            $prices = json_decode($prices, true);
-        }
-
-        // Fallback jaga-jaga kalau JSON kosong/error
-        if (!is_array($prices) || empty($prices)) {
-            $prices = ['first_class' => 150, 'business' => 50, 'exit_row' => 25, 'window' => 15];
-        }
 
         for ($r = 1; $r <= $layoutData['rows']; $r++) {
             $rowSeats = [];
@@ -92,18 +104,20 @@ class CheckoutController extends Controller
             $firstClassRows = $layoutData['first_class_rows'] ?? 0;
 
             if ($r <= $firstClassRows) {
-                $class = 'first_class';
-                $baseAdditional = $prices['first_class'] ?? 150;
+                $classType = 'first_class';
+                $baseAdditional = 150;
             } elseif ($r <= ($firstClassRows + $businessRows)) {
-                $class = 'business';
-                $baseAdditional = $prices['business'] ?? 50;
+                $classType = 'business';
+                $baseAdditional = 50;
             } else {
-                $class = 'economy';
-                $baseAdditional = 0.00;
+                $classType = 'economy';
+                $baseAdditional = 0;
             }
 
+            $classData = $classes->get($classType) ?? $classes->first();
+
             $isExitRow = in_array($r, $exitRows);
-            if ($isExitRow && $class === 'economy') $baseAdditional += ($prices['exit_row'] ?? 25);
+            if ($isExitRow && $classType === 'economy') $baseAdditional += 25;
 
             foreach ($columns as $groupIndex => $groupSize) {
                 for ($i = 0; $i < $groupSize; $i++) {
@@ -112,12 +126,13 @@ class CheckoutController extends Controller
                     $isAisle = ($i === 0 && $groupIndex !== 0) || ($i === ($groupSize - 1) && $groupIndex !== (count($columns) - 1));
 
                     $finalPrice = $baseAdditional;
-                    if ($isWindow && $class === 'economy') $finalPrice += ($prices['window'] ?? 15);
+                    if ($isWindow && $classType === 'economy') $finalPrice += 15;
 
                     $rowSeats[] = [
                         'id' => $seatCode,
                         'seat_code' => $seatCode,
-                        'class' => $class,
+                        'class' => $classType,
+                        'flight_class_id' => $classData ? $classData->id : null,
                         'is_window' => $isWindow,
                         'is_aisle' => $isAisle,
                         'is_exit_row' => $isExitRow,
@@ -138,7 +153,6 @@ class CheckoutController extends Controller
     // 1. INIT BOOKING
     public function initBooking(Request $request)
     {
-        // Validasi disederhanakan. Hapus 'exists:flights,id' karena tiket Duffel ID-nya masih null sebelum disave.
         $request->validate([
             'trip_type' => 'required|in:one_way,round_trip',
         ]);
@@ -148,7 +162,7 @@ class CheckoutController extends Controller
         $parentBooking = Booking::create([
             'user_id' => Auth::id(),
             'flight_id' => $outboundFlight->id,
-            'total_amount_usd' => $outboundFlight->base_price_usd,
+            'total_amount_usd' => $outboundFlight->starting_price,
             'status' => 'draft',
         ]);
 
@@ -158,7 +172,7 @@ class CheckoutController extends Controller
                 'user_id' => Auth::id(),
                 'flight_id' => $returnFlight->id,
                 'parent_booking_id' => $parentBooking->id,
-                'total_amount_usd' => $returnFlight->base_price_usd,
+                'total_amount_usd' => $returnFlight->starting_price,
                 'status' => 'draft',
             ]);
         }
@@ -169,30 +183,18 @@ class CheckoutController extends Controller
     // 2. PASSENGER FORM
     public function passengerForm($booking_session)
     {
-        $parentBooking = Booking::with(['flight.aircraft'])->findOrFail($booking_session);
-        $childBooking = Booking::with(['flight.aircraft'])->where('parent_booking_id', $parentBooking->id)->first();
+        $parentBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'flight.segments.classes'])->findOrFail($booking_session);
+        $childBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'flight.segments.classes'])->where('parent_booking_id', $parentBooking->id)->first();
 
-        // Inject Airline Info
-        $airlinesMap = Cache::remember('openflights_airlines', 86400, function () {
-            $response = Http::withoutVerifying()->get('https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat');
-            if ($response->successful()) {
-                $map = [];
-                foreach (explode("\n", $response->body()) as $line) {
-                    $cols = str_getcsv($line);
-                    if (count($cols) > 3 && !empty($cols[3]) && $cols[3] !== '\N' && $cols[3] !== '-') $map[$cols[3]] = $cols[1];
-                }
-                return $map;
-            }
-            return [];
-        });
+        $parentBooking->flight->append('starting_price');
+        if ($childBooking) $childBooking->flight->append('starting_price');
 
-        $parentBooking->flight->airline_name = $airlinesMap[$parentBooking->flight->airline_code] ?? $parentBooking->flight->airline_code;
-        if ($childBooking) $childBooking->flight->airline_name = $airlinesMap[$childBooking->flight->airline_code] ?? $childBooking->flight->airline_code;
+        $outboundMainAirline = $parentBooking->flight->segments->first()->airline_code ?? 'DEFAULT';
+        $returnMainAirline = $childBooking ? ($childBooking->flight->segments->first()->airline_code ?? 'DEFAULT') : 'DEFAULT';
 
-        // 👇 TAMBAHAN BARU: Ambil Addon Bagasi berdasarkan kode maskapai
         $baggageAddons = \App\Models\BaggageAddon::whereIn('airline_code', [
-            $parentBooking->flight->airline_code,
-            $childBooking ? $childBooking->flight->airline_code : 'DEFAULT' // Fallback ke DEFAULT kalau ga nemu
+            $outboundMainAirline,
+            $returnMainAirline
         ])->orWhere('airline_code', 'DEFAULT')->get();
 
         return Inertia::render('Flights/PassengerForm', [
@@ -200,37 +202,65 @@ class CheckoutController extends Controller
             'outbound_flight' => $parentBooking->flight,
             'return_flight' => $childBooking ? $childBooking->flight : null,
             'trip_type' => $childBooking ? 'round_trip' : 'one_way',
-            'baggage_addons' => $baggageAddons // 👇 LEMPAR KE VUE
+            'baggage_addons' => $baggageAddons
         ]);
     }
 
     // 3. SELECT SEAT
     public function selectSeat(Request $request, $booking_session)
     {
-        $passengers = $request->input('passengers'); // Ambil dari Vue state form
+        if ($request->isMethod('post')) {
+            session(['aero_pax_' . $booking_session => $request->input('passengers')]);
+        }
 
-        $parentBooking = Booking::with(['flight.aircraft'])->findOrFail($booking_session);
-        $childBooking = Booking::with(['flight.aircraft'])->where('parent_booking_id', $parentBooking->id)->first();
+        $passengers = session('aero_pax_' . $booking_session, []);
 
-        $outboundSeats = $this->generateSeatMap($parentBooking->flight);
-        $returnSeats = $childBooking ? $this->generateSeatMap($childBooking->flight) : null;
+        if (empty($passengers)) {
+            return redirect()->route('bookings.passengers', ['booking_session' => $booking_session]);
+        }
+
+        $parentBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.classes'])->findOrFail($booking_session);
+        $childBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.classes'])->where('parent_booking_id', $parentBooking->id)->first();
+
+        $parentBooking->flight->append('starting_price');
+        if ($childBooking) {
+            $childBooking->flight->append('starting_price');
+        }
+
+        $outboundSeatsMap = [];
+        foreach ($parentBooking->flight->segments as $segment) {
+            $outboundSeatsMap[$segment->id] = $this->generateSeatMap($segment);
+        }
+
+        $returnSeatsMap = [];
+        if ($childBooking) {
+            foreach ($childBooking->flight->segments as $segment) {
+                $returnSeatsMap[$segment->id] = $this->generateSeatMap($segment);
+            }
+        }
 
         return Inertia::render('Flights/SelectSeat', [
             'booking_session' => $parentBooking->id,
             'trip_type' => $childBooking ? 'round_trip' : 'one_way',
             'passengers' => $passengers,
             'outbound_flight' => $parentBooking->flight,
-            'outbound_seats' => $outboundSeats,
+            'outbound_seats_map' => $outboundSeatsMap,
             'return_flight' => $childBooking ? $childBooking->flight : null,
-            'return_seats' => $returnSeats,
+            'return_seats_map' => $returnSeatsMap,
         ]);
     }
 
     // 4. FINAL CHECKOUT (PAYMENT STRIPE)
     public function checkout(Request $request, $booking_session)
     {
-        $parentBooking = Booking::with('flight')->findOrFail($booking_session);
-        $childBooking = Booking::with('flight')->where('parent_booking_id', $parentBooking->id)->first();
+        // FIX ERROR 500: Eager load 'classes' untuk memastikan harga bisa dihitung
+        $parentBooking = Booking::with(['flight.segments.classes'])->findOrFail($booking_session);
+        $childBooking = Booking::with(['flight.segments.classes'])->where('parent_booking_id', $parentBooking->id)->first();
+
+        $parentBooking->flight->append('starting_price');
+        if ($childBooking) {
+            $childBooking->flight->append('starting_price');
+        }
 
         return DB::transaction(function () use ($request, $parentBooking, $childBooking) {
             $totalParentPrice = 0;
@@ -239,13 +269,32 @@ class CheckoutController extends Controller
             foreach ($request->passengers as $p) {
                 $baggageFee = $p['baggage_fee_usd'] ?? 0;
 
-                // Kalkulasi Tiket Berangkat
-                $outSeat = $p['outbound_seat'];
-                $totalParentPrice += $parentBooking->flight->base_price_usd + $baggageFee + ($outSeat['additional_price_usd'] ?? 0);
+                $outboundAssignedSeats = [];
+                $returnAssignedSeats = [];
+
+                $totalParentPrice += $parentBooking->flight->starting_price + $baggageFee;
+
+                if (isset($p['outbound_seats'])) {
+                    foreach ($p['outbound_seats'] as $outSeatSelection) {
+                        $segId = $outSeatSelection['segment_id'];
+                        $seatData = $outSeatSelection['seat'];
+
+                        $totalParentPrice += ($seatData['additional_price_usd'] ?? 0);
+                        $outboundAssignedSeats['segment_' . $segId] = $seatData['seat_code'];
+
+                        Seat::create([
+                            'flight_segment_id' => $segId,
+                            'flight_class_id' => $seatData['flight_class_id'],
+                            'seat_code' => $seatData['seat_code'],
+                            'additional_price_usd' => $seatData['additional_price_usd'] ?? 0,
+                            'status' => 'booked'
+                        ]);
+                    }
+                }
 
                 Passenger::create([
                     'booking_id' => $parentBooking->id,
-                    'seat_code' => $outSeat['seat_code'],
+                    'assigned_seats' => $outboundAssignedSeats,
                     'title' => $p['title'],
                     'first_name' => $p['first_name'],
                     'last_name' => $p['last_name'],
@@ -256,46 +305,44 @@ class CheckoutController extends Controller
                     'baggage_fee_usd' => $baggageFee,
                 ]);
 
-                Seat::create([
-                    'flight_id' => $parentBooking->flight_id,
-                    'seat_code' => $outSeat['seat_code'],
-                    'class' => $outSeat['class'],
-                    'additional_price_usd' => $outSeat['additional_price_usd'] ?? 0,
-                ]);
+                if ($childBooking && isset($p['return_seats'])) {
+                    $totalChildPrice += $childBooking->flight->starting_price;
 
-                // Kalkulasi Tiket Pulang (Jika ada)
-                if ($childBooking && isset($p['return_seat'])) {
-                    $retSeat = $p['return_seat'];
-                    $totalChildPrice += $childBooking->flight->base_price_usd + ($retSeat['additional_price_usd'] ?? 0);
+                    foreach ($p['return_seats'] as $retSeatSelection) {
+                        $segId = $retSeatSelection['segment_id'];
+                        $seatData = $retSeatSelection['seat'];
+
+                        $totalChildPrice += ($seatData['additional_price_usd'] ?? 0);
+                        $returnAssignedSeats['segment_' . $segId] = $seatData['seat_code'];
+
+                        Seat::create([
+                            'flight_segment_id' => $segId,
+                            'flight_class_id' => $seatData['flight_class_id'],
+                            'seat_code' => $seatData['seat_code'],
+                            'additional_price_usd' => $seatData['additional_price_usd'] ?? 0,
+                            'status' => 'booked'
+                        ]);
+                    }
 
                     Passenger::create([
                         'booking_id' => $childBooking->id,
-                        'seat_code' => $retSeat['seat_code'],
+                        'assigned_seats' => $returnAssignedSeats,
                         'title' => $p['title'],
                         'first_name' => $p['first_name'],
                         'last_name' => $p['last_name'],
                         'date_of_birth' => $p['date_of_birth'],
                         'nationality' => $p['nationality'],
                         'passport_number' => $p['passport_number'] ?? null,
-                        'extra_baggage_kg' => 0, // Bagasi kepulangan dipisah jika ingin, ini diset 0 untuk simpel
+                        'extra_baggage_kg' => 0,
                         'baggage_fee_usd' => 0,
-                    ]);
-
-                    Seat::create([
-                        'flight_id' => $childBooking->flight_id,
-                        'seat_code' => $retSeat['seat_code'],
-                        'class' => $retSeat['class'],
-                        'additional_price_usd' => $retSeat['additional_price_usd'] ?? 0,
                     ]);
                 }
             }
 
-            // Update Total dan Status
             $grandTotal = $totalParentPrice + $totalChildPrice;
             $parentBooking->update(['total_amount_usd' => $totalParentPrice, 'status' => 'pending']);
             if ($childBooking) $childBooking->update(['total_amount_usd' => $totalChildPrice, 'status' => 'pending']);
 
-            // Init Stripe
             Stripe::setApiKey(env('STRIPE_SECRET'));
             $paymentIntent = \Stripe\PaymentIntent::create([
                 'amount' => $grandTotal * 100,
@@ -308,43 +355,31 @@ class CheckoutController extends Controller
             $parentBooking->update(['stripe_payment_id' => $paymentIntent->id]);
             if ($childBooking) $childBooking->update(['stripe_payment_id' => $paymentIntent->id]);
 
-            return Inertia::render('Flights/Payment', [
-                'flight' => $parentBooking->flight, // Menampilkan data utama untuk UI payment
-                'return_flight' => $childBooking ? $childBooking->flight : null, // <-- TAMBAHKAN BARIS INI
-                'booking' => $parentBooking->load('passengers'),
-                'grandTotal' => $grandTotal,
-                'isRoundTrip' => (bool) $childBooking,
-                'clientSecret' => $paymentIntent->client_secret,
-                'stripeKey' => env('STRIPE_KEY')
-            ]);
+            // Hapus session sementara karena data penumpang sudah tersimpan ke tabel passengers
+            session()->forget('aero_pax_' . $parentBooking->id);
+
+            // 👇 GANTI RETURN INERTIA MENJADI REDIRECT AGAR MASUK KE GET REQUEST (Aman saat Refresh)
+            return redirect()->route('bookings.payment', ['booking' => $parentBooking->id]);
         });
     }
 
-    // 4.5 CONTINUE PAYMENT (Dari halaman History)
+    // 4.5 CONTINUE PAYMENT
     public function continuePayment(Booking $booking)
     {
-        // Pastikan hanya booking pending yang bisa dibayar ulang
         if ($booking->status !== 'pending') {
             return redirect()->route('bookings.history')->with('error', 'Booking ini sudah tidak dapat dibayar.');
         }
 
-        // Load relasi yang dibutuhkan oleh view Payment
-        $booking->load(['flight', 'passengers']);
-
-        // Cari tiket kepulangan jika ini Round Trip
-        $childBooking = Booking::with('flight')->where('parent_booking_id', $booking->id)->first();
-
-        // Hitung Grand Total
+        $booking->load(['flight.segments.airlineData', 'passengers']);
+        $childBooking = Booking::with(['flight.segments.airlineData'])->where('parent_booking_id', $booking->id)->first();
         $grandTotal = $booking->total_amount_usd + ($childBooking ? $childBooking->total_amount_usd : 0);
 
         Stripe::setApiKey(env('STRIPE_SECRET'));
 
         try {
-            // Coba panggil ulang Payment Intent yang lama dari Stripe
             $paymentIntent = \Stripe\PaymentIntent::retrieve($booking->stripe_payment_id);
             $clientSecret = $paymentIntent->client_secret;
         } catch (\Exception $e) {
-            // Jika Payment Intent lama gagal ditarik (mungkin expired), generate ulang yang baru
             $paymentIntent = \Stripe\PaymentIntent::create([
                 'amount' => $grandTotal * 100,
                 'currency' => 'usd',
@@ -353,16 +388,11 @@ class CheckoutController extends Controller
                 'receipt_email' => Auth::user()->email,
             ]);
 
-            // Update ID di database lokal kita
             $booking->update(['stripe_payment_id' => $paymentIntent->id]);
-            if ($childBooking) {
-                $childBooking->update(['stripe_payment_id' => $paymentIntent->id]);
-            }
-
+            if ($childBooking) $childBooking->update(['stripe_payment_id' => $paymentIntent->id]);
             $clientSecret = $paymentIntent->client_secret;
         }
 
-        // Render ulang komponen Payment.vue yang sudah kita buat
         return Inertia::render('Flights/Payment', [
             'flight' => $booking->flight,
             'return_flight' => $childBooking ? $childBooking->flight : null,
@@ -384,10 +414,10 @@ class CheckoutController extends Controller
             return redirect()->route('dashboard')->with('error', 'Pembayaran gagal atau belum selesai.');
         }
 
-        $parentBooking = Booking::with(['flight.aircraft', 'passengers'])->find($paymentIntent->metadata->parent_booking_id);
-        $childBooking = Booking::with(['flight.aircraft', 'passengers'])->where('parent_booking_id', $parentBooking->id)->first();
+        // Pastikan load relasi segments
+        $parentBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'passengers'])->find($paymentIntent->metadata->parent_booking_id);
+        $childBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'passengers'])->where('parent_booking_id', $parentBooking->id)->first();
 
-        // 👇 TAMBAHAN: Ambil Cache Nama Kota Bandara
         $airportsMap = Cache::remember('airports_data_map', 86400, function () {
             $response = Http::withoutVerifying()->get('https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json');
             $map = [];
@@ -401,7 +431,6 @@ class CheckoutController extends Controller
             return $map;
         });
 
-        // 👇 SUNTIK DATA KOTA KE FLIGHT
         if ($parentBooking) {
             $parentBooking->flight->origin_city = $airportsMap[$parentBooking->flight->origin_airport] ?? 'CITY N/A';
             $parentBooking->flight->destination_city = $airportsMap[$parentBooking->flight->destination_airport] ?? 'CITY N/A';
@@ -413,7 +442,6 @@ class CheckoutController extends Controller
 
         if ($parentBooking && $parentBooking->status === 'pending') {
             $pnrParent = strtoupper(Str::random(6));
-            // GENERATE QR TOKEN UNTUK OUTBOUND
             $qrParent = 'AERO-' . $pnrParent . '-' . Str::random(10);
 
             $parentBooking->update(['status' => 'paid', 'pnr_code' => $pnrParent, 'qr_token' => $qrParent]);
@@ -421,21 +449,13 @@ class CheckoutController extends Controller
 
             if ($childBooking) {
                 $pnrChild = strtoupper(Str::random(6));
-                // GENERATE QR TOKEN UNTUK RETURN
                 $qrChild = 'AERO-' . $pnrChild . '-' . Str::random(10);
 
                 $childBooking->update(['status' => 'paid', 'pnr_code' => $pnrChild, 'qr_token' => $qrChild]);
                 $childBooking->transactions()->create(['type' => 'payment', 'amount' => $childBooking->total_amount_usd, 'description' => 'Stripe Payment (Return)']);
             }
 
-            // Suntik Nama Maskapai khusus PDF
-            $airlinesMap = Cache::get('openflights_airlines', []);
-            $parentBooking->flight->airline_name = $airlinesMap[$parentBooking->flight->airline_code] ?? $parentBooking->flight->airline_code;
-            if ($childBooking) {
-                $childBooking->flight->airline_name = $airlinesMap[$childBooking->flight->airline_code] ?? $childBooking->flight->airline_code;
-            }
-
-            // Kirim email tiket
+            // PDF dikirim secara queued/background pada implementasi nyata, tapi di sini kita proses langsung
             $pdf = Pdf::setOption(['isRemoteEnabled' => true])->loadView('emails.ticket', [
                 'booking' => $parentBooking,
                 'child_booking' => $childBooking
@@ -443,15 +463,6 @@ class CheckoutController extends Controller
             Mail::to($request->user()->email)->send(new BookingConfirmed($parentBooking, $childBooking, $pdf->output()));
         }
 
-        // Suntik Nama Maskapai buat halaman Vue
-        $airlinesMap = Cache::get('openflights_airlines', []);
-        $parentBooking->flight->airline_name = $airlinesMap[$parentBooking->flight->airline_code] ?? $parentBooking->flight->airline_code;
-
-        if ($childBooking) {
-            $childBooking->flight->airline_name = $airlinesMap[$childBooking->flight->airline_code] ?? $childBooking->flight->airline_code;
-        }
-
-        // Lempar juga child_booking ke Vue
         return Inertia::render('Checkout/Success', [
             'booking' => $parentBooking,
             'child_booking' => $childBooking

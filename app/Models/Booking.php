@@ -5,35 +5,37 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\BookingStatusUpdated;
+use Illuminate\Support\Str; 
 
 class Booking extends Model
 {
+    protected $keyType = 'string';
+    public $incrementing = false;
+
     protected $fillable = [
         'user_id',
         'flight_id',
-        'parent_booking_id', // Untuk Round-trip
-        'rescheduled_from_id', // Baru: Khusus untuk tracking riwayat Reschedule
+        'parent_booking_id',
+        'rescheduled_from_id',
         'pnr_code',
         'provider_pnr',
-        'qr_token', // Baru
+        'qr_token',
         'total_amount_usd',
-        'promo_code', // Baru
-        'discount_amount_usd', // Baru
-        'insurance_fee_usd', // Baru
-        'points_used', // Baru
-        'points_earned', // Baru
+        'promo_code',
+        'discount_amount_usd',
+        'insurance_fee_usd',
+        'points_used',
+        'points_earned',
         'status',
-        'stripe_session_id', // Baru: Untuk continue payment
+        'stripe_session_id',
         'stripe_payment_id'
     ];
 
-    // Relasi tiket Pulang (Child) ke tiket Pergi (Parent) dalam satu Round-trip
     public function parentBooking()
     {
         return $this->belongsTo(Booking::class, 'parent_booking_id');
     }
 
-    // Relasi tiket baru (hasil reschedule) ke tiket lama
     public function rescheduledFrom()
     {
         return $this->belongsTo(Booking::class, 'rescheduled_from_id');
@@ -61,6 +63,12 @@ class Booking extends Model
 
     protected static function booted()
     {
+        static::creating(function ($model) {
+            if (empty($model->{$model->getKeyName()})) {
+                $model->{$model->getKeyName()} = (string) Str::uuid();
+            }
+        });
+
         static::updated(function ($booking) {
             if ($booking->wasChanged('status')) {
                 if ($booking->status !== 'pending' && $booking->status !== 'awaiting_payment') {

@@ -31,10 +31,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Select + Booking Seat
     Route::post('/bookings/init', [CheckoutController::class, 'initBooking'])->name('bookings.init');
     Route::get('/bookings/{booking_session}/passengers', [CheckoutController::class, 'passengerForm'])->name('bookings.passengers');
-    Route::post('/bookings/{booking_session}/seats', [CheckoutController::class, 'selectSeat'])->name('bookings.seats');
+
+    Route::match(['get', 'post'], '/bookings/{booking_session}/seats', [CheckoutController::class, 'selectSeat'])->name('bookings.seats');
+
     Route::post('/bookings/{booking_session}/checkout', [CheckoutController::class, 'checkout'])->name('bookings.checkout');
     Route::get('/bookings/{booking}/payment', [CheckoutController::class, 'continuePayment'])->name('bookings.payment');
-    
+
     // Checkout
     Route::get('/checkout/success', [CheckoutController::class, 'success'])->name('checkout.success');
 

@@ -10,8 +10,12 @@ return new class extends Migration
     {
         Schema::create('passengers', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('booking_id')->constrained()->cascadeOnDelete();
-            $table->string('seat_code')->nullable();
+            $table->foreignUuid('booking_id')->constrained()->cascadeOnDelete();
+
+            // Diubah jadi JSON untuk menyimpan seat per segment.
+            // Contoh format: {"segment_1": "12A", "segment_2": "14B"}
+            $table->json('assigned_seats')->nullable();
+
             $table->enum('title', ['Mr', 'Mrs', 'Ms', 'Miss'])->default('Mr');
             $table->string('first_name');
             $table->string('last_name');

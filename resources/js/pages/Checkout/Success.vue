@@ -1,4 +1,3 @@
-<!-- eslint-disable vue/block-lang -->
 <script setup>
 import { Head, Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
@@ -40,7 +39,7 @@ const calculateDuration = (departure, arrival) => {
 const displayFlightNumber = (airlineCode, flightNumber) => {
     const code = String(airlineCode || '').toUpperCase();
     const num = String(flightNumber || '').toUpperCase();
-    
+
     return num.includes(code) || num.includes('-') ? num : `${code}-${num}`;
 };
 </script>
@@ -155,8 +154,9 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                             >
                                 🛫
                                 {{
-                                    booking.flight.airline_name ||
-                                    booking.flight.airline_code
+                                    booking.flight.segments?.[0]?.airlineData
+                                        ?.name ||
+                                    booking.flight.segments?.[0]?.airline_code
                                 }}
                             </span>
                         </div>
@@ -225,8 +225,8 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                             >
                             <span class="font-mono font-bold text-foreground">{{
                                 displayFlightNumber(
-                                    booking.flight.airline_code,
-                                    booking.flight.flight_number,
+                                    booking.flight.segments?.[0]?.airline_code,
+                                    booking.flight.segments?.[0]?.flight_number,
                                 )
                             }}</span>
                         </div>
@@ -245,8 +245,10 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                             >
                                 🛬
                                 {{
-                                    child_booking.flight.airline_name ||
-                                    child_booking.flight.airline_code
+                                    child_booking.flight.segments?.[0]
+                                        ?.airlineData?.name ||
+                                    child_booking.flight.segments?.[0]
+                                        ?.airline_code
                                 }}
                             </span>
                         </div>
@@ -321,8 +323,10 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
                             >
                             <span class="font-mono font-bold text-foreground">{{
                                 displayFlightNumber(
-                                    child_booking.flight.airline_code,
-                                    child_booking.flight.flight_number,
+                                    child_booking.flight.segments?.[0]
+                                        ?.airline_code,
+                                    child_booking.flight.segments?.[0]
+                                        ?.flight_number,
                                 )
                             }}</span>
                         </div>

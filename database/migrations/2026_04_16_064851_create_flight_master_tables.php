@@ -29,6 +29,8 @@ return new class extends Migration
         Schema::create('baggage_addons', function (Blueprint $table) {
             $table->id();
             $table->string('airline_code');
+            // Menambahkan class_type agar bagasi tambahan bisa di-restrict/diberi harga beda per kelas
+            $table->enum('class_type', ['economy', 'business', 'first_class'])->nullable();
             $table->integer('weight_kg');
             $table->decimal('price_usd', 10, 2);
             $table->timestamps();

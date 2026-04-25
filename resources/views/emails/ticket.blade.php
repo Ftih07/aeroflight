@@ -249,7 +249,7 @@
                 <tr>
                     <td valign="middle">
                         <div class="flight-title">Outbound Flight Details</div>
-                        <div class="badge-outbound">OUTBOUND: {{ $booking->flight->airline_name ?? $booking->flight->airline_code }}</div>
+                        <div class="badge-outbound">OUTBOUND: {{ $booking->flight->segments[0]->airlineData->name ?? $booking->flight->segments[0]->airline_code }}</div>
                     </td>
                     <td align="right" valign="middle" width="100">
                         @if($booking->qr_token)
@@ -298,12 +298,16 @@
             <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #fdf8f6; padding: 10px; border-radius: 6px; border: 1px solid #e5e7eb;">
                 <tr>
                     <td style="font-size: 11px;">
-                        <strong>Flight No:</strong> {{ $booking->flight->airline_code }}-{{ $booking->flight->flight_number }} &nbsp;|&nbsp;
-                        <strong>Aircraft:</strong> {{ $booking->flight->aircraft->model_name ?? 'TBA' }}<br>
+                        <strong>Flight No:</strong> {{ $booking->flight->segments[0]->airline_code }}-{{ $booking->flight->segments[0]->flight_number }} &nbsp;|&nbsp;
+                        <strong>Aircraft:</strong> {{ $booking->flight->segments[0]->aircraft->model_name ?? 'TBA' }}<br>
 
                         <div style="margin-top: 8px;">
                             <strong>Included Facilities:</strong>
-                            @php $fac = is_string($booking->flight->facilities) ? json_decode($booking->flight->facilities, true) : $booking->flight->facilities; @endphp
+                            @php
+                            // Ambil fasilitas dari class di segment pertama
+                            $outboundClassData = $booking->flight->segments[0]->classes->first();
+                            $fac = $outboundClassData ? $outboundClassData->facilities : [];
+                            @endphp
                             @if(isset($fac['meal']) && $fac['meal']) <span class="facility-badge">Meal</span> @endif
                             @if(isset($fac['wifi']) && $fac['wifi']) <span class="facility-badge">WiFi</span> @endif
                             @if(isset($fac['entertainment']) && $fac['entertainment']) <span class="facility-badge">Screen</span> @endif
@@ -322,7 +326,7 @@
                     <th>No.</th>
                     <th>Passenger Name</th>
                     <th>ID / Passport</th>
-                    <th>Seat</th>
+                    <th>Seat(s)</th>
                     <th>Baggage Info</th>
                 </tr>
                 @foreach($booking->passengers as $index => $passenger)
@@ -330,10 +334,19 @@
                     <td style="text-align: center;">{{ $index + 1 }}</td>
                     <td><strong>{{ strtoupper($passenger->title . '. ' . $passenger->first_name . ' ' . $passenger->last_name) }}</strong></td>
                     <td>{{ $passenger->passport_number ?? '-' }}</td>
-                    <td style="text-align: center;"><strong>{{ $passenger->seat_code ?? '-' }}</strong></td>
+                    <td style="text-align: center;">
+                        <strong>
+                            @php
+                            // Decode JSON jika formatnya string
+                            $seatsAssigned = is_string($passenger->assigned_seats) ? json_decode($passenger->assigned_seats, true) : $passenger->assigned_seats;
+                            $seatCodes = $seatsAssigned ? implode(', ', array_values($seatsAssigned)) : 'TBA';
+                            @endphp
+                            {{ $seatCodes }}
+                        </strong>
+                    </td>
                     <td>
-                        <small>Cabin:</small> {{ $booking->flight->cabin_baggage_kg }}KG<br>
-                        <small>Checked:</small> {{ $booking->flight->free_baggage_kg + $passenger->extra_baggage_kg }}KG
+                        <small>Cabin:</small> {{ $outboundClassData ? $outboundClassData->cabin_baggage_kg : 7 }}KG<br>
+                        <small>Checked:</small> {{ ($outboundClassData ? $outboundClassData->free_baggage_kg : 20) + $passenger->extra_baggage_kg }}KG
                     </td>
                 </tr>
                 @endforeach
@@ -344,7 +357,7 @@
                 <tr>
                     <td valign="middle">
                         <div class="flight-title">Return Flight Details</div>
-                        <div class="badge-return">RETURN: {{ $child_booking->flight->airline_name ?? $child_booking->flight->airline_code }}</div>
+                        <div class="badge-return">RETURN: {{ $child_booking->flight->segments[0]->airlineData->name ?? $child_booking->flight->segments[0]->airline_code }}</div>
                     </td>
                     <td align="right" valign="middle" width="100">
                         @if($child_booking->qr_token)
@@ -393,12 +406,15 @@
             <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #fdf8f6; padding: 10px; border-radius: 6px; border: 1px solid #e5e7eb;">
                 <tr>
                     <td style="font-size: 11px;">
-                        <strong>Flight No:</strong> {{ $child_booking->flight->airline_code }}-{{ $child_booking->flight->flight_number }} &nbsp;|&nbsp;
-                        <strong>Aircraft:</strong> {{ $child_booking->flight->aircraft->model_name ?? 'TBA' }}<br>
+                        <strong>Flight No:</strong> {{ $child_booking->flight->segments[0]->airline_code }}-{{ $child_booking->flight->segments[0]->flight_number }} &nbsp;|&nbsp;
+                        <strong>Aircraft:</strong> {{ $child_booking->flight->segments[0]->aircraft->model_name ?? 'TBA' }}<br>
 
                         <div style="margin-top: 8px;">
                             <strong>Included Facilities:</strong>
-                            @php $fac2 = is_string($child_booking->flight->facilities) ? json_decode($child_booking->flight->facilities, true) : $child_booking->flight->facilities; @endphp
+                            @php
+                            $returnClassData = $child_booking->flight->segments[0]->classes->first();
+                            $fac2 = $returnClassData ? $returnClassData->facilities : [];
+                            @endphp
                             @if(isset($fac2['meal']) && $fac2['meal']) <span class="facility-badge">Meal</span> @endif
                             @if(isset($fac2['wifi']) && $fac2['wifi']) <span class="facility-badge">WiFi</span> @endif
                             @if(isset($fac2['entertainment']) && $fac2['entertainment']) <span class="facility-badge">Screen</span> @endif
@@ -417,7 +433,7 @@
                     <th>No.</th>
                     <th>Passenger Name</th>
                     <th>ID / Passport</th>
-                    <th>Seat</th>
+                    <th>Seat(s)</th>
                     <th>Baggage Info</th>
                 </tr>
                 @foreach($child_booking->passengers as $index => $passenger)
@@ -425,10 +441,18 @@
                     <td style="text-align: center;">{{ $index + 1 }}</td>
                     <td><strong>{{ strtoupper($passenger->title . '. ' . $passenger->first_name . ' ' . $passenger->last_name) }}</strong></td>
                     <td>{{ $passenger->passport_number ?? '-' }}</td>
-                    <td style="text-align: center;"><strong>{{ $passenger->seat_code ?? '-' }}</strong></td>
+                    <td style="text-align: center;">
+                        <strong>
+                            @php
+                            $retSeatsAssigned = is_string($passenger->assigned_seats) ? json_decode($passenger->assigned_seats, true) : $passenger->assigned_seats;
+                            $retSeatCodes = $retSeatsAssigned ? implode(', ', array_values($retSeatsAssigned)) : 'TBA';
+                            @endphp
+                            {{ $retSeatCodes }}
+                        </strong>
+                    </td>
                     <td>
-                        <small>Cabin:</small> {{ $child_booking->flight->cabin_baggage_kg }}KG<br>
-                        <small>Checked:</small> {{ $child_booking->flight->free_baggage_kg + $passenger->extra_baggage_kg }}KG
+                        <small>Cabin:</small> {{ $returnClassData ? $returnClassData->cabin_baggage_kg : 7 }}KG<br>
+                        <small>Checked:</small> {{ ($returnClassData ? $returnClassData->free_baggage_kg : 20) + $passenger->extra_baggage_kg }}KG
                     </td>
                 </tr>
                 @endforeach
