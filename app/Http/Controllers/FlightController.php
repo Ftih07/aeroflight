@@ -33,7 +33,29 @@ class FlightController extends Controller
         $rawDuffelOffers = $duffelService->searchFlights($origin, $destination, $date);
 
         if ($rawDuffelOffers && $allAircrafts->isNotEmpty()) {
-            $duffelFlights = collect($rawDuffelOffers)->map(function ($offer) use ($allAircrafts) {
+
+            // --- FILTER DATA SAMPAH DARI DUFFEL SEBELUM DI-MAPPING ---
+            $validOffers = collect($rawDuffelOffers)->filter(function ($offer) {
+                // 1. Harga tidak boleh kosong atau 0
+                if (empty($offer['total_amount']) || $offer['total_amount'] <= 0) {
+                    return false;
+                }
+
+                // 2. Harus punya segment penerbangan
+                if (empty($offer['slices'][0]['segments'])) {
+                    return false;
+                }
+
+                // 3. Maskapai dan Nomor Penerbangan tidak boleh kosong (Cek segment pertama)
+                $firstSegment = $offer['slices'][0]['segments'][0];
+                if (empty($firstSegment['operating_carrier']['iata_code']) || empty($firstSegment['operating_carrier_flight_number'])) {
+                    return false;
+                }
+
+                return true; // Lolos filter
+            });
+
+            $duffelFlights = $validOffers->map(function ($offer) use ($allAircrafts) {
                 $segments = $offer['slices'][0]['segments'];
                 $firstSegment = $segments[0];
                 $lastSegment = end($segments);

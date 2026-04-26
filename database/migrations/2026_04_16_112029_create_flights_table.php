@@ -25,7 +25,9 @@ return new class extends Migration
 
             // Policy Umum
             $table->boolean('is_refundable')->default(false);
-            $table->boolean('is_reschedulable')->default(false);
+            $table->decimal('refund_fee_usd', 10, 2)->nullable();
+
+            $table->text('policy_notes')->nullable();
 
             $table->timestamps();
         });

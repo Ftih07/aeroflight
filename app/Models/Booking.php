@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\BookingStatusUpdated;
-use Illuminate\Support\Str; 
+use Illuminate\Support\Str;
 
 class Booking extends Model
 {
@@ -16,12 +16,13 @@ class Booking extends Model
         'user_id',
         'flight_id',
         'parent_booking_id',
-        'rescheduled_from_id',
         'pnr_code',
         'provider_pnr',
         'qr_token',
         'total_amount_usd',
-        'promo_code',
+        'final_amount_usd',
+        'promo_id',             
+        'insurance_id',          
         'discount_amount_usd',
         'insurance_fee_usd',
         'points_used',
@@ -34,11 +35,6 @@ class Booking extends Model
     public function parentBooking()
     {
         return $this->belongsTo(Booking::class, 'parent_booking_id');
-    }
-
-    public function rescheduledFrom()
-    {
-        return $this->belongsTo(Booking::class, 'rescheduled_from_id');
     }
 
     public function user()
@@ -59,6 +55,17 @@ class Booking extends Model
     public function transactions()
     {
         return $this->hasMany(Transaction::class);
+    }
+
+    // RELASI BARU
+    public function promo()
+    {
+        return $this->belongsTo(Promo::class);
+    }
+
+    public function insurance()
+    {
+        return $this->belongsTo(Insurance::class);
     }
 
     protected static function booted()

@@ -6,6 +6,8 @@ use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
+use function Symfony\Component\Clock\now;
+
 class DatabaseSeeder extends Seeder
 {
     /**
@@ -19,6 +21,7 @@ class DatabaseSeeder extends Seeder
             'email' => 'naufalfathi37@gmail.com',
             'password' => Hash::make('12345678'),
             'role' => 'customer',
+            'email_verified_at' => now(),
         ]);
 
         // 2. Akun Admin

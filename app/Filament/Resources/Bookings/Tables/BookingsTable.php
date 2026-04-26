@@ -71,10 +71,8 @@ class BookingsTable
                     ->icon('heroicon-o-currency-dollar')
                     ->color('danger')
                     ->requiresConfirmation()
-
-                    // --- 1. MUNCULKAN FORM INPUT PERSENTASE ---
                     ->form([
-                        TextInput::make('refund_percentage')
+                        \Filament\Forms\Components\TextInput::make('refund_percentage')
                             ->label('Refund Percentage (%)')
                             ->numeric()
                             ->default(100)
@@ -83,81 +81,103 @@ class BookingsTable
                             ->required()
                             ->helperText('Masukkan persentase dana (1-100) yang akan dikembalikan dari sisa uang setelah dipotong Stripe Fee.'),
                     ])
-
                     ->modalHeading('Process Stripe Refund')
                     ->visible(fn($record) => $record->status === 'refund_requested' && !empty($record->stripe_payment_id))
-
-                    // --- 2. TANGKAP INPUTAN ADMIN LEWAT array $data ---
                     ->action(function (array $data, $record) {
                         try {
-                            Stripe::setApiKey(env('STRIPE_SECRET'));
-                            $session = StripeSession::retrieve($record->stripe_payment_id);
+                            \Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
 
-                            if ($session->payment_intent) {
-
-                                // Rumus fee standar Stripe: 2.9% + $0.30
-                                $stripeFeeUsd = ($record->total_amount_usd * 0.029) + 0.30;
-
-                                // Uang maksimal yang bisa dikembalikan tanpa bikin perusahaan rugi
-                                $maxRefundUsd = $record->total_amount_usd - $stripeFeeUsd;
-
-                                // Hitung nominal akhir berdasarkan persentase yang diketik Admin
-                                $percentage = $data['refund_percentage'] / 100;
-                                $finalRefundUsd = $maxRefundUsd * $percentage;
-
-                                // Convert ke Cents untuk Stripe
-                                $refundAmountCents = (int) round($finalRefundUsd * 100);
-
-                                // Eksekusi ke Stripe
-                                Refund::create([
-                                    'payment_intent' => $session->payment_intent,
-                                    'amount' => $refundAmountCents,
-                                ]);
-
-                                // --- PENCATATAN KE TABEL TRANSACTIONS ---
-
-                                // 1. Catat Biaya Stripe (Kerugian/Beban)
-                                $record->transactions()->create([
-                                    'type' => 'stripe_fee',
-                                    'amount' => $stripeFeeUsd,
-                                    'description' => 'Stripe processing fee deducted from refund'
-                                ]);
-
-                                // 2. Catat Uang yang dikembalikan ke user
-                                $record->transactions()->create([
-                                    'type' => 'refund',
-                                    'amount' => $finalRefundUsd,
-                                    'description' => 'Refunded to customer (' . $data['refund_percentage'] . '%)'
-                                ]);
-
-                                // 3. Catat Uang yang ditahan perusahaan (Cancellation Fee)
-                                // Jika admin nge-refund < 100%, sisa uangnya jadi milik perusahaan
-                                $cancellationFee = $maxRefundUsd - $finalRefundUsd;
-                                if ($cancellationFee > 0) {
-                                    $record->transactions()->create([
-                                        'type' => 'cancellation_fee',
-                                        'amount' => $cancellationFee,
-                                        'description' => 'Cancellation fee kept by company'
-                                    ]);
-                                }
-
-                                // Update status booking
-                                $record->update(['status' => 'refunded']);
-
-                                // Kosongkan Kursi
-                                foreach ($record->passengers as $passenger) {
-                                    \App\Models\Seat::where('id', $passenger->seat_id)
-                                        ->update(['is_available' => true]);
-                                }
-
-                                Notification::make()
-                                    ->title('Refund Successful!')
-                                    ->body('Returned $' . number_format($finalRefundUsd, 2) . ' (' . $data['refund_percentage'] . '%) to customer.')
-                                    ->success()
-                                    ->send();
+                            // LANGSUNG CEK PAYMENT ID (Lebih aman dari retrieve session)
+                            if (empty($record->stripe_payment_id)) {
+                                throw new \Exception("Payment ID tidak ditemukan. Transaksi ini mungkin tidak diselesaikan melalui Stripe.");
                             }
+
+                            // UBAH DI SINI: Gunakan final_amount_usd karena itu uang real yang masuk ke Stripe
+                            // Rumus fee standar Stripe: 2.9% + $0.30
+                            $stripeFeeUsd = ($record->final_amount_usd * 0.029) + 0.30;
+
+                            // Uang maksimal yang bisa dikembalikan tanpa bikin perusahaan rugi
+                            $maxRefundUsd = $record->final_amount_usd - $stripeFeeUsd;
+
+                            if ($maxRefundUsd <= 0) {
+                                throw new \Exception("Nominal pembayaran terlalu kecil untuk di-refund setelah dipotong fee Stripe.");
+                            }
+
+                            // Hitung nominal akhir berdasarkan persentase yang diketik Admin
+                            $percentage = $data['refund_percentage'] / 100;
+                            $finalRefundUsd = $maxRefundUsd * $percentage;
+
+                            // Convert ke Cents untuk Stripe
+                            $refundAmountCents = (int) round($finalRefundUsd * 100);
+
+                            // Eksekusi ke Stripe
+                            \Stripe\Refund::create([
+                                'payment_intent' => $record->stripe_payment_id,
+                                'amount' => $refundAmountCents,
+                            ]);
+
+                            // --- PENCATATAN KE TABEL TRANSACTIONS ---
+
+                            // 1. Catat Biaya Stripe
+                            $record->transactions()->create([
+                                'type' => 'stripe_fee',
+                                'amount' => $stripeFeeUsd,
+                                'description' => 'Stripe processing fee deducted from refund'
+                            ]);
+
+                            // 2. Catat Uang yang dikembalikan ke user
+                            $record->transactions()->create([
+                                'type' => 'refund',
+                                'amount' => $finalRefundUsd,
+                                'description' => 'Refunded to customer (' . $data['refund_percentage'] . '%)'
+                            ]);
+
+                            // 3. Catat Uang yang ditahan perusahaan (Cancellation Fee)
+                            $cancellationFee = $maxRefundUsd - $finalRefundUsd;
+                            if ($cancellationFee > 0) {
+                                $record->transactions()->create([
+                                    'type' => 'cancellation_fee',
+                                    'amount' => $cancellationFee,
+                                    'description' => 'Cancellation fee kept by company (' . (100 - $data['refund_percentage']) . '%)'
+                                ]);
+                            }
+
+                            // Update status booking
+                            $record->update(['status' => 'refunded']);
+
+                            // Kosongkan Kursi
+                            foreach ($record->passengers as $passenger) {
+                                $passenger->update(['assigned_seats' => null]);
+                            }
+
+                            // Optional: Kembalikan Poin User kalau mau
+                            if ($record->points_used > 0) {
+                                $user = \App\Models\User::find($record->user_id);
+                                if ($user) {
+                                    $user->increment('loyalty_points', $record->points_used);
+                                }
+                            }
+
+                            // Tarik balik Poin yang didapat dari transaksi ini
+                            if ($record->points_earned > 0) {
+                                $user = \App\Models\User::find($record->user_id);
+                                if ($user) {
+                                    // Cegah poin user jadi minus kalau dia udah pake poinnya buat hal lain
+                                    $newPoin = max(0, $user->loyalty_points - $record->points_earned);
+                                    $user->update(['loyalty_points' => $newPoin]);
+                                }
+                            }
+
+                            \Filament\Notifications\Notification::make()
+                                ->title('Refund Successful!')
+                                ->body('Returned $' . number_format($finalRefundUsd, 2) . ' (' . $data['refund_percentage'] . '%) to customer.')
+                                ->success()
+                                ->send();
                         } catch (\Exception $e) {
-                            Notification::make()->title('Refund Failed: ' . $e->getMessage())->danger()->send();
+                            \Filament\Notifications\Notification::make()
+                                ->title('Refund Failed: ' . $e->getMessage())
+                                ->danger()
+                                ->send();
                         }
                     }),
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Booking;
+use App\Models\Flight;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -17,7 +18,16 @@ class BookingController extends Controller
         $userId = Auth::id();
 
         // 1. Ambil data booking berserta relasinya
-        $bookings = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'flight.segments.classes', 'transactions', 'passengers'])
+        $bookings = Booking::with([
+            'flight',
+            'flight.segments.aircraft',
+            'flight.segments.airlineData',
+            'flight.segments.classes',
+            'transactions',
+            'passengers',
+            'promo',      // Pastikan ini ada
+            'insurance'   // Pastikan ini ada
+        ])
             ->withCount('passengers')
             ->where('user_id', $userId)
             ->whereNull('parent_booking_id') // Hanya ambil Outbound
@@ -26,7 +36,14 @@ class BookingController extends Controller
 
         // 2. Ambil SEMUA child bookings yang nyambung ke parent di atas
         $parentIds = $bookings->pluck('id');
-        $childBookings = Booking::with(['flight.segments.aircraft', 'flight.segments.airlineData', 'flight.segments.classes', 'passengers'])
+        $childBookings = Booking::with([
+            'flight',
+            'flight.segments.aircraft',
+            'flight.segments.airlineData',
+            'flight.segments.classes',
+            'passengers',
+            // Child booking nggak nyimpen promo/insurance, tapi nggak apa-apa diload untuk konsistensi
+        ])
             ->whereIn('parent_booking_id', $parentIds)
             ->get()
             ->keyBy('parent_booking_id');
@@ -56,8 +73,15 @@ class BookingController extends Controller
 
     public function downloadTicket(Booking $booking)
     {
-        // ... (KODE FUNGSI INI TETAP SAMA SEPERTI YANG SUDAH SAYA BERIKAN SEBELUMNYA) ...
-        $booking->load(['flight.segments.aircraft', 'flight.segments.classes', 'flight.segments.airlineData', 'passengers']);
+        // Load relasi promo & insurance agar bisa dibaca di PDF
+        $booking->load([
+            'flight.segments.aircraft',
+            'flight.segments.classes',
+            'flight.segments.airlineData',
+            'passengers',
+            'promo',       // Tambahan
+            'insurance'    // Tambahan
+        ]);
 
         $childBooking = Booking::with(['flight.segments.aircraft', 'flight.segments.classes', 'flight.segments.airlineData', 'passengers'])
             ->where('parent_booking_id', $booking->id)

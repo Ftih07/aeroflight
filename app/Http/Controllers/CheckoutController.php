@@ -206,7 +206,7 @@ class CheckoutController extends Controller
         ]);
     }
 
-    // 3. SELECT SEAT
+    // 3. SELECT SEAT (TAMPILKAN HALAMAN)
     public function selectSeat(Request $request, $booking_session)
     {
         if ($request->isMethod('post')) {
@@ -239,6 +239,11 @@ class CheckoutController extends Controller
             }
         }
 
+        // --- TAMBAHAN UNTUK ADD-ONS & POIN ---
+        $activePromos = \App\Models\Promo::where('is_active', true)->whereDate('valid_until', '>=', now())->get();
+        $activeInsurances = \App\Models\Insurance::where('is_active', true)->get();
+        $user = Auth::user();
+
         return Inertia::render('Flights/SelectSeat', [
             'booking_session' => $parentBooking->id,
             'trip_type' => $childBooking ? 'round_trip' : 'one_way',
@@ -247,13 +252,15 @@ class CheckoutController extends Controller
             'outbound_seats_map' => $outboundSeatsMap,
             'return_flight' => $childBooking ? $childBooking->flight : null,
             'return_seats_map' => $returnSeatsMap,
+            'promos' => $activePromos,
+            'insurances' => $activeInsurances,
+            'availablePoints' => $user->loyalty_points ?? 0 // Kirim poin user saat ini
         ]);
     }
 
     // 4. FINAL CHECKOUT (PAYMENT STRIPE)
     public function checkout(Request $request, $booking_session)
     {
-        // FIX ERROR 500: Eager load 'classes' untuk memastikan harga bisa dihitung
         $parentBooking = Booking::with(['flight.segments.classes'])->findOrFail($booking_session);
         $childBooking = Booking::with(['flight.segments.classes'])->where('parent_booking_id', $parentBooking->id)->first();
 
@@ -266,9 +273,9 @@ class CheckoutController extends Controller
             $totalParentPrice = 0;
             $totalChildPrice = 0;
 
+            // --- 1. SIMPAN DATA KURSI & PASSENGER ---
             foreach ($request->passengers as $p) {
                 $baggageFee = $p['baggage_fee_usd'] ?? 0;
-
                 $outboundAssignedSeats = [];
                 $returnAssignedSeats = [];
 
@@ -282,7 +289,7 @@ class CheckoutController extends Controller
                         $totalParentPrice += ($seatData['additional_price_usd'] ?? 0);
                         $outboundAssignedSeats['segment_' . $segId] = $seatData['seat_code'];
 
-                        Seat::create([
+                        \App\Models\Seat::create([
                             'flight_segment_id' => $segId,
                             'flight_class_id' => $seatData['flight_class_id'],
                             'seat_code' => $seatData['seat_code'],
@@ -292,7 +299,7 @@ class CheckoutController extends Controller
                     }
                 }
 
-                Passenger::create([
+                \App\Models\Passenger::create([
                     'booking_id' => $parentBooking->id,
                     'assigned_seats' => $outboundAssignedSeats,
                     'title' => $p['title'],
@@ -315,7 +322,7 @@ class CheckoutController extends Controller
                         $totalChildPrice += ($seatData['additional_price_usd'] ?? 0);
                         $returnAssignedSeats['segment_' . $segId] = $seatData['seat_code'];
 
-                        Seat::create([
+                        \App\Models\Seat::create([
                             'flight_segment_id' => $segId,
                             'flight_class_id' => $seatData['flight_class_id'],
                             'seat_code' => $seatData['seat_code'],
@@ -324,7 +331,7 @@ class CheckoutController extends Controller
                         ]);
                     }
 
-                    Passenger::create([
+                    \App\Models\Passenger::create([
                         'booking_id' => $childBooking->id,
                         'assigned_seats' => $returnAssignedSeats,
                         'title' => $p['title'],
@@ -339,13 +346,75 @@ class CheckoutController extends Controller
                 }
             }
 
-            $grandTotal = $totalParentPrice + $totalChildPrice;
-            $parentBooking->update(['total_amount_usd' => $totalParentPrice, 'status' => 'pending']);
-            if ($childBooking) $childBooking->update(['total_amount_usd' => $totalChildPrice, 'status' => 'pending']);
+            // --- 2. HITUNG PROMO, ASURANSI, DAN POIN ---
+            $discountAmount = 0;
+            $insuranceFee = 0;
+            $promoId = null;
+            $insuranceId = null;
+            $pointsUsed = (int) $request->input('points_used', 0);
 
-            Stripe::setApiKey(env('STRIPE_SECRET'));
+            if ($request->filled('insurance_id')) {
+                $insurance = \App\Models\Insurance::find($request->insurance_id);
+                if ($insurance) {
+                    $insuranceId = $insurance->id;
+                    $insuranceFee = $insurance->price_usd * count($request->passengers);
+                }
+            }
+
+            // SubTotal menggabungkan tiket parent + child
+            $subTotal = $totalParentPrice + $totalChildPrice + $insuranceFee;
+
+            if ($request->filled('promo_code')) {
+                $promo = \App\Models\Promo::where('code', $request->promo_code)->where('is_active', true)->first();
+                if ($promo) {
+                    $promoId = $promo->id;
+                    $discountAmount = $promo->discount_type === 'percentage'
+                        ? $subTotal * ($promo->discount_value / 100)
+                        : $promo->discount_value;
+
+                    if (!is_null($promo->quota) && $promo->quota > 0) {
+                        $promo->decrement('quota');
+                    }
+                }
+            }
+
+            $totalAfterDiscount = max(0, $subTotal - $discountAmount);
+
+            // DEDUCT POIN USER
+            $user = Auth::user();
+            if ($pointsUsed > 0 && $user) {
+                $pointsUsed = min($pointsUsed, $user->loyalty_points ?? 0, floor($totalAfterDiscount));
+                $user->decrement('loyalty_points', $pointsUsed);
+            }
+
+            // --- 3. FINAL TOTAL ---
+            $grandTotal = max(0, $totalAfterDiscount - $pointsUsed);
+            $pointsEarned = floor($grandTotal);
+
+            // SIMPAN HARGA KE DB
+            $parentBooking->update([
+                'total_amount_usd' => $totalParentPrice, // Hanya harga Base + Seats outbound
+                'final_amount_usd' => $grandTotal,       // Harga Akhir Semua Transaksi
+                'status' => 'pending',
+                'promo_id' => $promoId,
+                'discount_amount_usd' => $discountAmount,
+                'insurance_id' => $insuranceId,
+                'insurance_fee_usd' => $insuranceFee,
+                'points_used' => $pointsUsed,
+                'points_earned' => $pointsEarned
+            ]);
+
+            if ($childBooking) {
+                $childBooking->update([
+                    'total_amount_usd' => $totalChildPrice, // Hanya harga Base + Seats return
+                    'final_amount_usd' => $totalChildPrice,
+                    'status' => 'pending'
+                ]);
+            }
+
+            \Stripe\Stripe::setApiKey(env('STRIPE_SECRET'));
             $paymentIntent = \Stripe\PaymentIntent::create([
-                'amount' => $grandTotal * 100,
+                'amount' => (int) round($grandTotal * 100),
                 'currency' => 'usd',
                 'description' => 'AeroFlight Booking - ' . $parentBooking->flight->origin_airport . ' to ' . $parentBooking->flight->destination_airport . ($childBooking ? ' (Round Trip)' : ''),
                 'metadata' => ['parent_booking_id' => $parentBooking->id],
@@ -355,10 +424,8 @@ class CheckoutController extends Controller
             $parentBooking->update(['stripe_payment_id' => $paymentIntent->id]);
             if ($childBooking) $childBooking->update(['stripe_payment_id' => $paymentIntent->id]);
 
-            // Hapus session sementara karena data penumpang sudah tersimpan ke tabel passengers
             session()->forget('aero_pax_' . $parentBooking->id);
 
-            // 👇 GANTI RETURN INERTIA MENJADI REDIRECT AGAR MASUK KE GET REQUEST (Aman saat Refresh)
             return redirect()->route('bookings.payment', ['booking' => $parentBooking->id]);
         });
     }
@@ -372,7 +439,9 @@ class CheckoutController extends Controller
 
         $booking->load(['flight.segments.airlineData', 'passengers']);
         $childBooking = Booking::with(['flight.segments.airlineData'])->where('parent_booking_id', $booking->id)->first();
-        $grandTotal = $booking->total_amount_usd + ($childBooking ? $childBooking->total_amount_usd : 0);
+
+        // CUKUP PANGGIL INI AJA SEKARANG! Gak perlu itung-itung lagi.
+        $grandTotal = $booking->final_amount_usd;
 
         Stripe::setApiKey(env('STRIPE_SECRET'));
 
@@ -381,7 +450,7 @@ class CheckoutController extends Controller
             $clientSecret = $paymentIntent->client_secret;
         } catch (\Exception $e) {
             $paymentIntent = \Stripe\PaymentIntent::create([
-                'amount' => $grandTotal * 100,
+                'amount' => (int) round($grandTotal * 100),
                 'currency' => 'usd',
                 'description' => 'AeroFlight Booking - ' . $booking->flight->origin_airport . ' to ' . $booking->flight->destination_airport . ($childBooking ? ' (Round Trip)' : ''),
                 'metadata' => ['parent_booking_id' => $booking->id],
@@ -445,14 +514,33 @@ class CheckoutController extends Controller
             $qrParent = 'AERO-' . $pnrParent . '-' . Str::random(10);
 
             $parentBooking->update(['status' => 'paid', 'pnr_code' => $pnrParent, 'qr_token' => $qrParent]);
-            $parentBooking->transactions()->create(['type' => 'payment', 'amount' => $parentBooking->total_amount_usd, 'description' => 'Stripe Payment (Outbound)']);
+
+            // 👇 UBAH DI SINI: Gunakan final_amount_usd
+            $parentBooking->transactions()->create([
+                'type' => 'payment',
+                'amount' => $parentBooking->final_amount_usd,
+                'description' => 'Stripe Payment (Outbound)'
+            ]);
 
             if ($childBooking) {
                 $pnrChild = strtoupper(Str::random(6));
                 $qrChild = 'AERO-' . $pnrChild . '-' . Str::random(10);
 
                 $childBooking->update(['status' => 'paid', 'pnr_code' => $pnrChild, 'qr_token' => $qrChild]);
-                $childBooking->transactions()->create(['type' => 'payment', 'amount' => $childBooking->total_amount_usd, 'description' => 'Stripe Payment (Return)']);
+
+                // 👇 UBAH DI SINI: Gunakan final_amount_usd
+                $childBooking->transactions()->create([
+                    'type' => 'payment',
+                    'amount' => $childBooking->final_amount_usd,
+                    'description' => 'Stripe Payment (Return)'
+                ]);
+            }
+
+            // --- TAMBAHKAN POIN LOYALTI KE USER SETELAH BAYAR SUKSES ---
+            if ($parentBooking->points_earned > 0) {
+                $user = $request->user();
+                $user->loyalty_points = ($user->loyalty_points ?? 0) + $parentBooking->points_earned;
+                $user->save();
             }
 
             // PDF dikirim secara queued/background pada implementasi nyata, tapi di sini kita proses langsung

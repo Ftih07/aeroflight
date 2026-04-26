@@ -10,6 +10,13 @@ class Airline extends Model
         'code',
         'name',
         'logo_path',
-        'description'
+        'description',
+        'founded_year', // Tambahan
+        'headquarters'  // Tambahan
     ];
+
+    public function aircrafts()
+    {
+        return $this->belongsToMany(Aircraft::class);
+    }
 }

@@ -2,7 +2,7 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
 import { loadStripe } from '@stripe/stripe-js';
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { Button } from '@/components/ui/button';
 import AeroLayout from '@/layouts/AeroLayout.vue';
 
@@ -54,36 +54,6 @@ const getCityName = (code) => {
     return airport ? airport.name : '';
 };
 
-// --- CALCULATIONS UNTUK RINCIAN HARGA ---
-const baggageTotal = computed(() => {
-    return props.booking.passengers.reduce(
-        (sum, p) => sum + Number(p.baggage_fee_usd || 0),
-        0,
-    );
-});
-
-// Harga dasar sekarang merujuk ke atribut starting_price yang di-append di Controller
-const baseFlightTotal = computed(() => {
-    let flightSum =
-        Number(props.flight.starting_price || 0) *
-        props.booking.passengers.length;
-
-    if (props.isRoundTrip && props.return_flight) {
-        flightSum +=
-            Number(props.return_flight.starting_price || 0) *
-            props.booking.passengers.length;
-    }
-
-    return flightSum;
-});
-
-const seatUpgradeTotal = computed(() => {
-    // Sisa dari grandTotal - (base + baggage)
-    const currentGrand = props.grandTotal || props.booking.total_amount_usd;
-    
-    return currentGrand - baseFlightTotal.value - baggageTotal.value;
-});
-
 // --- HELPER WAKTU & DURASI ---
 const formatTime = (dateString) =>
     new Date(dateString).toLocaleTimeString([], {
@@ -104,6 +74,13 @@ const displayFlightNumber = (airlineCode, flightNumber) => {
     const num = String(flightNumber || '').toUpperCase();
 
     return num.includes(code) || num.includes('-') ? num : `${code}-${num}`;
+};
+
+const formatCurrency = (value) => {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+    }).format(value);
 };
 
 onMounted(async () => {
@@ -261,6 +238,11 @@ const submitPayment = async () => {
                                     >{{ flight.origin_airport }}</span
                                 >
                                 <span
+                                    class="mb-1 block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
+                                >
+                                    {{ getCityName(flight.origin_airport) }}
+                                </span>
+                                <span
                                     class="text-[11px] font-semibold text-muted-foreground"
                                     >{{ formatTime(flight.departure_at) }}</span
                                 >
@@ -314,28 +296,16 @@ const submitPayment = async () => {
                                     >{{ flight.destination_airport }}</span
                                 >
                                 <span
-                                    class="text-[11px] font-semibold text-muted-foreground"
-                                    >{{ formatTime(flight.arrival_at) }}</span
+                                    class="mb-1 ml-auto block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
                                 >
+                                    {{
+                                        getCityName(flight.destination_airport)
+                                    }}
+                                </span>
+                                <span class="text-xs text-muted-foreground">{{
+                                    formatTime(flight.arrival_at)
+                                }}</span>
                             </div>
-                        </div>
-
-                        <div
-                            v-if="flight.stop_count > 0"
-                            class="mt-2 text-center text-[10px] text-muted-foreground"
-                        >
-                            via
-                            {{
-                                flight.segments
-                                    ?.slice(0, -1)
-                                    ?.map(
-                                        (seg) =>
-                                            getCityName(
-                                                seg.destination_airport,
-                                            ) || seg.destination_airport,
-                                    )
-                                    ?.join(', ')
-                            }}
                         </div>
                     </div>
 
@@ -367,6 +337,15 @@ const submitPayment = async () => {
                                     class="block text-xl font-black text-foreground"
                                     >{{ return_flight.origin_airport }}</span
                                 >
+                                <span
+                                    class="mb-1 block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
+                                >
+                                    {{
+                                        getCityName(
+                                            return_flight.origin_airport,
+                                        )
+                                    }}
+                                </span>
                                 <span
                                     class="text-[11px] font-semibold text-muted-foreground"
                                     >{{
@@ -428,30 +407,18 @@ const submitPayment = async () => {
                                     }}</span
                                 >
                                 <span
-                                    class="text-[11px] font-semibold text-muted-foreground"
-                                    >{{
-                                        formatTime(return_flight.arrival_at)
-                                    }}</span
+                                    class="mb-1 ml-auto block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
                                 >
+                                    {{
+                                        getCityName(
+                                            return_flight.destination_airport,
+                                        )
+                                    }}
+                                </span>
+                                <span class="text-xs text-muted-foreground">{{
+                                    formatTime(return_flight.arrival_at)
+                                }}</span>
                             </div>
-                        </div>
-
-                        <div
-                            v-if="return_flight.stop_count > 0"
-                            class="mt-2 text-center text-[10px] text-muted-foreground"
-                        >
-                            via
-                            {{
-                                return_flight.segments
-                                    ?.slice(0, -1)
-                                    ?.map(
-                                        (seg) =>
-                                            getCityName(
-                                                seg.destination_airport,
-                                            ) || seg.destination_airport,
-                                    )
-                                    ?.join(', ')
-                            }}
                         </div>
                     </div>
 
@@ -460,70 +427,76 @@ const submitPayment = async () => {
                     >
                         <div class="flex items-center justify-between">
                             <span class="text-muted-foreground"
-                                >Flight Tickets (x{{
-                                    booking.passengers.length
-                                }})</span
+                                >Base Flight Ticket(s) & Seats</span
                             >
                             <span class="font-semibold text-foreground">
                                 {{
-                                    new Intl.NumberFormat('en-US', {
-                                        style: 'currency',
-                                        currency: 'USD',
-                                    }).format(baseFlightTotal)
+                                    formatCurrency(
+                                        Number(booking.total_amount_usd) +
+                                            (isRoundTrip && return_flight
+                                                ? Number(
+                                                      return_flight.total_amount_usd,
+                                                  )
+                                                : 0),
+                                    )
                                 }}
                             </span>
                         </div>
 
                         <div
-                            v-if="baggageTotal > 0"
+                            v-if="Number(booking.insurance_fee_usd) > 0"
                             class="flex items-center justify-between"
                         >
-                            <span class="text-xs text-muted-foreground"
-                                >Extra Baggage</span
+                            <span class="text-muted-foreground"
+                                >Travel Protection Insurance</span
                             >
-                            <span class="text-xs font-medium text-foreground">
-                                +
+                            <span class="font-medium text-foreground"
+                                >+
                                 {{
-                                    new Intl.NumberFormat('en-US', {
-                                        style: 'currency',
-                                        currency: 'USD',
-                                    }).format(baggageTotal)
-                                }}
-                            </span>
+                                    formatCurrency(
+                                        Number(booking.insurance_fee_usd),
+                                    )
+                                }}</span
+                            >
                         </div>
 
                         <div
-                            v-if="seatUpgradeTotal > 0"
-                            class="flex items-center justify-between"
+                            v-if="Number(booking.discount_amount_usd) > 0"
+                            class="flex items-center justify-between text-emerald-600"
                         >
-                            <span class="text-xs text-muted-foreground"
-                                >Seat Upgrades</span
-                            >
-                            <span class="text-xs font-medium text-foreground">
-                                +
+                            <span class="font-bold">Promo Discount</span>
+                            <span class="font-bold"
+                                >-
                                 {{
-                                    new Intl.NumberFormat('en-US', {
-                                        style: 'currency',
-                                        currency: 'USD',
-                                    }).format(seatUpgradeTotal)
-                                }}
-                            </span>
+                                    formatCurrency(
+                                        Number(booking.discount_amount_usd),
+                                    )
+                                }}</span
+                            >
+                        </div>
+
+                        <div
+                            v-if="Number(booking.points_used) > 0"
+                            class="flex items-center justify-between text-amber-600"
+                        >
+                            <span class="font-bold">AeroPoints Applied</span>
+                            <span class="font-bold"
+                                >-
+                                {{
+                                    formatCurrency(Number(booking.points_used))
+                                }}</span
+                            >
                         </div>
                     </div>
 
-                    <div class="mb-6 flex items-end justify-between">
+                    <div
+                        class="mb-8 flex items-center justify-between rounded-xl border border-primary/10 bg-primary/5 p-4"
+                    >
                         <span class="font-bold text-muted-foreground"
-                            >Total to Pay</span
+                            >Total Paid</span
                         >
-                        <span class="text-3xl font-black text-primary">
-                            {{
-                                new Intl.NumberFormat('en-US', {
-                                    style: 'currency',
-                                    currency: 'USD',
-                                }).format(
-                                    grandTotal || booking.total_amount_usd,
-                                )
-                            }}
+                        <span class="text-2xl font-black text-primary">
+                            {{ formatCurrency(grandTotal) }}
                         </span>
                     </div>
 

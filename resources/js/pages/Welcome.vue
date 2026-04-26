@@ -459,10 +459,13 @@
                             {{ feat }}
                         </li>
                     </ul>
-                    <a
-                        href="#"
+
+                    <Link
+                        v-if="service.link"
+                        :href="service.link"
                         class="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-primary transition-all hover:gap-2"
-                        >Learn More
+                    >
+                        Explore Directory
                         <svg
                             class="h-3 w-3"
                             fill="none"
@@ -474,8 +477,31 @@
                                 stroke-linejoin="round"
                                 stroke-width="2"
                                 d="M9 5l7 7-7 7"
-                            /></svg
-                    ></a>
+                            />
+                        </svg>
+                    </Link>
+
+                    <a
+                        v-else
+                        href="#"
+                        @click.prevent
+                        class="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-primary transition-all hover:gap-2"
+                    >
+                        Learn More
+                        <svg
+                            class="h-3 w-3"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M9 5l7 7-7 7"
+                            />
+                        </svg>
+                    </a>
                 </div>
             </div>
         </section>
@@ -927,7 +953,7 @@ export default {
 <script setup>
 /* eslint-disable import/order */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, Link } from '@inertiajs/vue3';
 import AeroLayout from '@/layouts/AeroLayout.vue';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -1116,7 +1142,7 @@ const saveToRecent = (searchParams) => {
             ),
     );
     history.unshift(searchParams);
-    
+
     if (history.length > 5) {
         history.pop();
     }
@@ -1320,6 +1346,19 @@ const services = [
             'VIP concierge service',
             'Custom routes',
         ],
+    },
+    {
+        icon: '🌍',
+        title: 'Airline Directory',
+        glow: 'bg-cyan-500',
+        desc: 'Explore the world’s top airlines. Discover their history, hubs, and the advanced aircraft fleets they operate.',
+        features: [
+            'Airline history & hubs',
+            'Fleet specifications',
+            'Seat layouts',
+            'Operator info',
+        ],
+        link: '/airlines', // Kita simpan nama route-nya di sini
     },
 ];
 

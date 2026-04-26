@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AirlineController;
 use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 
@@ -17,6 +18,12 @@ Route::inertia('/', 'Welcome', [
 ])->name('home');
 
 Route::get('/flights', [FlightController::class, 'search'])->name('flights.search');
+
+// Halaman Directory (Katalog Semua Maskapai)
+Route::get('/airlines', [AirlineController::class, 'index'])->name('airlines.index');
+
+// Halaman Detail Maskapai
+Route::get('/airlines/{code}', [AirlineController::class, 'show'])->name('airlines.show');
 
 Route::get('/auth/google', [GoogleController::class, 'redirect'])->name('google.login');
 Route::get('/auth/google/callback', [GoogleController::class, 'callback']);

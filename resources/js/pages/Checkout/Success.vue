@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { Button } from '@/components/ui/button';
 import AeroLayout from '@/layouts/AeroLayout.vue';
 
@@ -11,16 +11,40 @@ const props = defineProps({
     child_booking: { type: Object, default: null }, // Child Booking (Return)
 });
 
-// Hitung total harga gabungan
+// Hitung total harga gabungan akhir LANGSUNG dari final_amount_usd DB
 const grandTotal = computed(() => {
-    let total = Number(props.booking.total_amount_usd);
+    return Number(props.booking.final_amount_usd || 0);
+});
 
-    if (props.child_booking) {
-        total += Number(props.child_booking.total_amount_usd);
+// --- HELPER NAMA KOTA BANDARA ---
+const allAirports = ref([]);
+
+onMounted(async () => {
+    try {
+        const resAirports = await fetch(
+            'https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json',
+        );
+
+        if (resAirports.ok) {
+            const dataAirports = await resAirports.json();
+            allAirports.value = dataAirports.filter(
+                (a) => a.code && a.code.trim() !== '',
+            );
+        }
+    } catch (error) {
+        console.error('Gagal mengambil data bandara:', error);
+    }
+});
+
+const getCityName = (code) => {
+    if (!allAirports.value || allAirports.value.length === 0) {
+        return '';
     }
 
-    return total;
-});
+    const airport = allAirports.value.find((a) => a.code === code);
+
+    return airport ? airport.name : '';
+};
 
 const formatTime = (dateString) =>
     new Date(dateString).toLocaleTimeString([], {

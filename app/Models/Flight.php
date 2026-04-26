@@ -15,7 +15,8 @@ class Flight extends Model
         'departure_at',
         'arrival_at',
         'is_refundable',
-        'is_reschedulable',
+        'refund_fee_usd',       // Tambahan
+        'policy_notes',         // Tambahan
     ];
 
     protected function casts(): array
@@ -24,7 +25,7 @@ class Flight extends Model
             'departure_at' => 'datetime',
             'arrival_at' => 'datetime',
             'is_refundable' => 'boolean',
-            'is_reschedulable' => 'boolean',
+            'refund_fee_usd' => 'decimal:2',
         ];
     }
 

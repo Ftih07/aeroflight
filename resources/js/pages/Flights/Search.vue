@@ -325,6 +325,10 @@ const getTotalTransitDuration = (segments) => {
 
 const processFlights = (flightsArray) => {
     let result = flightsArray.filter((flight) => {
+        if (!flight.starting_price || flight.starting_price <= 0) {
+            return false;
+        }
+
         // Ambil airline dari segmen pertama
         const mainAirline =
             flight.segments && flight.segments[0]

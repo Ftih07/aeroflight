@@ -470,10 +470,52 @@
                     </td>
                 </tr>
 
+                <tr>
+                    <td colspan="4" style="text-align: right; font-size: 12px; color: #4b5563;">
+                        Base Flight Ticket(s) & Seat Selection
+                    </td>
+                    <td style="text-align: right; font-size: 12px; font-weight: bold;">
+                        ${{ number_format($booking->total_amount_usd + (isset($child_booking) ? $child_booking->total_amount_usd : 0), 2) }}
+                    </td>
+                </tr>
+
+                @if($booking->insurance_fee_usd > 0)
+                <tr>
+                    <td colspan="4" style="text-align: right; font-size: 12px; color: #4b5563;">
+                        Travel Protection Insurance
+                    </td>
+                    <td style="text-align: right; font-size: 12px; font-weight: bold;">
+                        + ${{ number_format($booking->insurance_fee_usd, 2) }}
+                    </td>
+                </tr>
+                @endif
+
+                @if($booking->discount_amount_usd > 0)
+                <tr>
+                    <td colspan="4" style="text-align: right; font-size: 12px; color: #047857;">
+                        Promo Discount
+                    </td>
+                    <td style="text-align: right; font-size: 12px; font-weight: bold; color: #047857;">
+                        - ${{ number_format($booking->discount_amount_usd, 2) }}
+                    </td>
+                </tr>
+                @endif
+
+                @if($booking->points_used > 0)
+                <tr>
+                    <td colspan="4" style="text-align: right; font-size: 12px; color: #d97706;">
+                        AeroPoints Applied
+                    </td>
+                    <td style="text-align: right; font-size: 12px; font-weight: bold; color: #d97706;">
+                        - ${{ number_format($booking->points_used, 2) }}
+                    </td>
+                </tr>
+                @endif
+
                 <tr class="total-row">
                     <td colspan="4" style="text-align: right;">TOTAL PAID ({{ strtoupper($booking->status) }})</td>
                     <td style="text-align: right;">
-                        ${{ number_format($booking->total_amount_usd + (isset($child_booking) ? $child_booking->total_amount_usd : 0), 2) }}
+                        ${{ number_format($booking->final_amount_usd, 2) }}
                     </td>
                 </tr>
             </table>

@@ -9,14 +9,16 @@ defineOptions({ layout: undefined });
 const props = defineProps<{
     booking_session: string | number;
     trip_type: string;
-    passengers: any[]; // Data dari PassengerForm sebelumnya
+    passengers: any[];
     outbound_flight: any;
-    outbound_seats_map: Record<string, any>; // Menampung map bersarang per segment
+    outbound_seats_map: Record<string, any>;
     return_flight?: any;
     return_seats_map?: Record<string, any>;
+    promos: any[];
+    insurances: any[];
+    availablePoints: number;
 }>();
 
-// --- HELPER NAMA KOTA BANDARA ---
 const allAirports = ref<any[]>([]);
 
 onMounted(async () => {
@@ -24,7 +26,6 @@ onMounted(async () => {
         const resAirports = await fetch(
             'https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json',
         );
-
         if (resAirports.ok) {
             const dataAirports = await resAirports.json();
             allAirports.value = dataAirports.filter(
@@ -37,35 +38,28 @@ onMounted(async () => {
 });
 
 const getCityName = (code: string) => {
-    if (!allAirports.value || allAirports.value.length === 0) {
-        return '';
-    }
-
+    if (!allAirports.value || allAirports.value.length === 0) return '';
     const airport = allAirports.value.find((a: any) => a.code === code);
-
     return airport ? airport.name : '';
 };
 
-// --- 1. STATE MANAGEMENT MULTI-SEGMENT ---
+// --- STATE MANAGEMENT ---
 const activeFlightDirection = ref<'outbound' | 'return'>('outbound');
 const activePassengerIndex = ref<number>(0);
 const activeSegmentId = ref<string | number>(
     props.outbound_flight?.segments?.[0]?.id || '',
 );
 
-// Struktur data baru: selections.value[arah][index_penumpang][id_segment] = objekKursi
 const selections = ref<Record<string, Record<number, Record<string, any>>>>({
     outbound: {},
     return: {},
 });
 
-// Inisialisasi struktur object kosong untuk setiap penumpang
 props.passengers.forEach((_, i) => {
     selections.value.outbound[i] = {};
     selections.value.return[i] = {};
 });
 
-// --- 2. COMPUTED HELPERS UNTUK UI DINAMIS ---
 const currentSegments = computed(() => {
     return activeFlightDirection.value === 'outbound'
         ? props.outbound_flight?.segments || []
@@ -77,7 +71,6 @@ const currentSeatMap = computed(() => {
         activeFlightDirection.value === 'outbound'
             ? props.outbound_seats_map
             : props.return_seats_map;
-
     return mapSource ? mapSource[activeSegmentId.value] : {};
 });
 
@@ -94,39 +87,28 @@ const currentSegmentSelections = computed(() => {
             result[pIndex] = selections.value[currentDir][pIndex][segId];
         }
     }
-
     return result;
 });
 
-// --- 3. LOGIC PEMILIHAN KURSI (DENGAN VALIDASI KELAS & ADJACENCY) ---
 const toggleSeat = (seat: any) => {
-    if (!seat.is_available) {
-        return;
-    }
+    if (!seat.is_available) return;
 
     const pIndex = activePassengerIndex.value;
     const currentDir = activeFlightDirection.value;
     const segId = String(activeSegmentId.value);
 
-    // Cek apakah kursi ini sudah diambil penumpang lain di segment yang sama
     const alreadySelectedByOther = Object.entries(
         currentSegmentSelections.value,
     ).find(([idx, s]) => s.id === seat.id && Number(idx) !== pIndex);
-
-    if (alreadySelectedByOther) {
+    if (alreadySelectedByOther)
         return alert('Kursi ini sudah dipilih untuk penumpang lain.');
-    }
 
-    // Jika kursi sama di-klik ulang, berarti UNSELECT
     if (selections.value[currentDir][pIndex][segId]?.id === seat.id) {
         delete selections.value[currentDir][pIndex][segId];
-        
         return;
     }
 
-    // --- VALIDASI: HARUS DALAM KELAS YANG SAMA ---
     const passengerZeroSeat = selections.value[currentDir][0][segId];
-
     if (pIndex !== 0 && passengerZeroSeat) {
         if (passengerZeroSeat.class !== seat.class) {
             return alert(
@@ -135,44 +117,7 @@ const toggleSeat = (seat: any) => {
         }
     }
 
-    // --- VALIDASI: KURSI HARUS DEMPETAN JIKA > 1 PENUMPANG ---
-    if (pIndex > 0) {
-        const selectedSeatsInThisSegment = Object.values(
-            currentSegmentSelections.value,
-        ).filter((s: any) => s && s.id !== seat.id);
-
-        if (selectedSeatsInThisSegment.length > 0) {
-            const currentRow = parseInt(seat.seat_code.replace(/[^0-9]/g, ''));
-            const currentColChar = seat.seat_code.replace(/[0-9]/g, '');
-            const colCharCode = currentColChar.charCodeAt(0);
-
-            const isAdjacent = selectedSeatsInThisSegment.some(
-                (selSeat: any) => {
-                    const selRow = parseInt(
-                        selSeat.seat_code.replace(/[^0-9]/g, ''),
-                    );
-                    const selColChar = selSeat.seat_code.replace(/[0-9]/g, '');
-                    const selColCharCode = selColChar.charCodeAt(0);
-
-                    return (
-                        selRow === currentRow &&
-                        Math.abs(selColCharCode - colCharCode) === 1
-                    );
-                },
-            );
-
-            if (!isAdjacent) {
-                return alert(
-                    'Posisi kursi harus bersebelahan (dempetan) dengan penumpang lainnya dalam satu baris!',
-                );
-            }
-        }
-    }
-
-    // Lolos semua validasi, simpan kursinya
     selections.value[currentDir][pIndex][segId] = seat;
-
-    // Auto-advance ke penumpang berikutnya JIKA belum milih kursi
     if (
         pIndex < props.passengers.length - 1 &&
         !selections.value[currentDir][pIndex + 1][segId]
@@ -189,86 +134,134 @@ const switchTab = (direction: 'outbound' | 'return') => {
     activeSegmentId.value = flights?.segments?.[0]?.id || '';
 };
 
-// Cek apakah semua kursi di semua segment dan semua arah sudah terisi
 const isReadyToCheckout = computed(() => {
     let isReady = true;
-
-    // Cek Outbound
     for (let pIndex = 0; pIndex < props.passengers.length; pIndex++) {
         props.outbound_flight?.segments?.forEach((seg: any) => {
-            if (!selections.value.outbound[pIndex][seg.id]) {
-                isReady = false;
-            }
+            if (!selections.value.outbound[pIndex][seg.id]) isReady = false;
         });
     }
-
-    // Cek Return
     if (props.trip_type === 'round_trip' && props.return_flight) {
         for (let pIndex = 0; pIndex < props.passengers.length; pIndex++) {
             props.return_flight?.segments?.forEach((seg: any) => {
-                if (!selections.value.return[pIndex][seg.id]) {
-                    isReady = false;
-                }
+                if (!selections.value.return[pIndex][seg.id]) isReady = false;
             });
         }
     }
-
     return isReady;
 });
 
-// --- 4. PERHITUNGAN HARGA TOTAL ---
+// --- STATE PROMO, ASURANSI, LOYALTI ---
+const inputPromoCode = ref('');
+const appliedPromo = ref<any>(null);
+const promoError = ref('');
+const selectedInsuranceId = ref<number | null>(null);
+const pointsToUse = ref<number>(0);
+
+const applyPromo = () => {
+    promoError.value = '';
+    appliedPromo.value = null;
+    if (!inputPromoCode.value) return;
+
+    const foundPromo = props.promos.find(
+        (p) =>
+            p.code.toUpperCase() === inputPromoCode.value.toUpperCase() &&
+            p.quota !== 0,
+    );
+    if (foundPromo) appliedPromo.value = foundPromo;
+    else promoError.value = 'Invalid, expired, or fully redeemed code.';
+};
+
+const removePromo = () => {
+    appliedPromo.value = null;
+    inputPromoCode.value = '';
+    promoError.value = '';
+};
+
 const totalSeatPrice = computed(() => {
     let total = 0;
     ['outbound', 'return'].forEach((dir) => {
-        if (dir === 'return' && props.trip_type !== 'round_trip') {
-            return;
-        }
-
-        Object.values(selections.value[dir]).forEach(
-            (passengerSelections: any) => {
-                Object.values(passengerSelections).forEach((seatObj: any) => {
-                    total += Number(seatObj.additional_price_usd || 0);
-                });
-            },
-        );
+        if (dir === 'return' && props.trip_type !== 'round_trip') return;
+        Object.values(selections.value[dir]).forEach((pSelections: any) => {
+            Object.values(pSelections).forEach((sObj: any) => {
+                total += Number(sObj.additional_price_usd || 0);
+            });
+        });
     });
-
     return total;
 });
 
-const totalPrice = computed(() => {
-    const baseAndBaggageTotal = props.passengers.reduce((sum, p) => {
-        let pTotal =
+const totalPriceObj = computed(() => {
+    const totalOutbound = props.passengers.reduce((sum, p) => {
+        return (
+            sum +
             Number(props.outbound_flight?.starting_price || 0) +
-            Number(p.baggage_fee_usd || 0);
-
-        if (props.trip_type === 'round_trip' && props.return_flight) {
-            pTotal += Number(props.return_flight.starting_price || 0);
-        }
-
-        return sum + pTotal;
+            Number(p.baggage_fee_usd || 0)
+        );
     }, 0);
 
-    return baseAndBaggageTotal + totalSeatPrice.value;
-});
+    const totalReturn =
+        props.trip_type === 'round_trip' && props.return_flight
+            ? props.passengers.reduce(
+                  (sum) =>
+                      sum + Number(props.return_flight.starting_price || 0),
+                  0,
+              )
+            : 0;
 
-// --- 5. FORMATTING HELPERS ---
-const calculateDuration = (departure: string, arrival: string): string => {
-    const diffMs = new Date(arrival).getTime() - new Date(departure).getTime();
+    const baseAndBaggageTotal = totalOutbound + totalReturn;
+    let subTotal = baseAndBaggageTotal + totalSeatPrice.value;
 
-    if (isNaN(diffMs)) {
-        return '-';
+    let insuranceTotal = 0;
+    if (selectedInsuranceId.value) {
+        const ins = props.insurances.find(
+            (i) => i.id === selectedInsuranceId.value,
+        );
+        if (ins)
+            insuranceTotal = Number(ins.price_usd) * props.passengers.length;
+    }
+    subTotal += insuranceTotal;
+
+    let discountTotal = 0;
+    if (appliedPromo.value) {
+        if (appliedPromo.value.discount_type === 'percentage') {
+            discountTotal =
+                subTotal * (Number(appliedPromo.value.discount_value) / 100);
+        } else {
+            discountTotal = Number(appliedPromo.value.discount_value);
+        }
     }
 
+    let totalAfterDiscount = Math.max(0, subTotal - discountTotal);
+
+    if (pointsToUse.value > props.availablePoints)
+        pointsToUse.value = props.availablePoints;
+    if (pointsToUse.value > totalAfterDiscount)
+        pointsToUse.value = Math.floor(totalAfterDiscount);
+    if (pointsToUse.value < 0 || !pointsToUse.value) pointsToUse.value = 0;
+
+    const finalPay = Math.max(0, totalAfterDiscount - pointsToUse.value);
+
+    return {
+        base: baseAndBaggageTotal,
+        seats: totalSeatPrice.value,
+        insurance: insuranceTotal,
+        discount: discountTotal,
+        finalPay: finalPay,
+        pointsEarned: Math.floor(finalPay),
+    };
+});
+
+const calculateDuration = (departure: string, arrival: string): string => {
+    const diffMs = new Date(arrival).getTime() - new Date(departure).getTime();
+    if (isNaN(diffMs)) return '-';
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
     const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-
     return diffHrs === 0 ? `${diffMins}m` : `${diffHrs}h ${diffMins}m`;
 };
 
 const formatTime = (dateString: string): string => {
     const date = new Date(dateString);
-
     return isNaN(date.getTime())
         ? '-'
         : date.toLocaleTimeString('en-GB', {
@@ -280,19 +273,21 @@ const formatTime = (dateString: string): string => {
 
 const displayFlightNumber = (airlineCode: string, flightNumber: string) => {
     const num = String(flightNumber || '').toUpperCase();
-
     return num.includes('-')
         ? num
         : `${String(airlineCode || '').toUpperCase()}-${num}`;
 };
 
-// --- 6. SUBMIT KE CHECKOUT ---
-const proceedToCheckout = () => {
-    if (!isReadyToCheckout.value) {
-        return;
-    }
+const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+    }).format(value);
+};
 
-    // Mapping ulang object selections ke array untuk dilempar ke Controller
+const proceedToCheckout = () => {
+    if (!isReadyToCheckout.value) return;
+
     const finalPassengers = props.passengers.map((p, i) => {
         const outSeatsArray = Object.keys(selections.value.outbound[i]).map(
             (segId) => ({
@@ -318,12 +313,15 @@ const proceedToCheckout = () => {
 
     router.post(`/bookings/${props.booking_session}/checkout`, {
         passengers: finalPassengers,
+        promo_code: appliedPromo.value ? appliedPromo.value.code : null,
+        insurance_id: selectedInsuranceId.value,
+        points_used: pointsToUse.value,
     });
 };
 </script>
 
 <template>
-    <Head title="Select Seats" />
+    <Head title="Select Seats & Add-ons" />
 
     <AeroLayout>
         <main
@@ -377,10 +375,10 @@ const proceedToCheckout = () => {
                                 class="text-xs font-bold text-muted-foreground uppercase"
                                 >Flight {{ idx + 1 }}</span
                             >
-                            <span class="text-sm font-black text-foreground">
-                                {{ seg.origin_airport }} ✈️
-                                {{ seg.destination_airport }}
-                            </span>
+                            <span class="text-sm font-black text-foreground"
+                                >{{ seg.origin_airport }} ✈️
+                                {{ seg.destination_airport }}</span
+                            >
                         </button>
                     </div>
 
@@ -445,7 +443,6 @@ const proceedToCheckout = () => {
                             <div
                                 class="mb-[-20px] h-24 w-64 rounded-t-[100px] border-4 border-b-0 border-border bg-muted/20"
                             ></div>
-
                             <div
                                 class="relative rounded-[40px] border-4 border-border bg-muted/20 px-6 py-10 sm:px-12 sm:py-14"
                             >
@@ -483,7 +480,6 @@ const proceedToCheckout = () => {
                                         >
                                             {{ rowNumber }}
                                         </div>
-
                                         <template
                                             v-for="(seat, index) in seatsInRow"
                                             :key="seat.id || 'aisle_' + index"
@@ -492,7 +488,6 @@ const proceedToCheckout = () => {
                                                 v-if="seat.is_aisle_space"
                                                 class="w-4 shrink-0 sm:w-8"
                                             ></div>
-
                                             <button
                                                 v-else
                                                 @click="toggleSeat(seat)"
@@ -561,17 +556,15 @@ const proceedToCheckout = () => {
                                                                   ? 'text-amber-700'
                                                                   : 'text-foreground',
                                                     ]"
-                                                >
-                                                    {{
+                                                    >{{
                                                         seat.seat_code.replace(
                                                             /[0-9]/g,
                                                             '',
                                                         )
-                                                    }}
-                                                </span>
+                                                    }}</span
+                                                >
                                             </button>
                                         </template>
-
                                         <div
                                             class="ml-2 flex w-4 justify-center text-xs font-bold text-muted-foreground sm:ml-4 sm:w-6"
                                         >
@@ -630,37 +623,35 @@ const proceedToCheckout = () => {
                             class="mb-3 flex items-start justify-between border-b border-border/50 pb-3"
                         >
                             <div class="flex flex-col">
-                                <span class="text-sm font-bold text-foreground">
-                                    {{
+                                <span
+                                    class="text-sm font-bold text-foreground"
+                                    >{{
                                         outbound_flight.segments?.[0]
                                             ?.airlineData?.name ||
                                         outbound_flight.segments?.[0]
                                             ?.airline_code
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                                 <span
                                     class="text-[10px] font-medium tracking-tight text-muted-foreground uppercase"
-                                >
-                                    {{
+                                    >{{
                                         outbound_flight.segments?.[0]?.aircraft
                                             ?.model_name || 'Aircraft TBA'
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                             </div>
                             <span
                                 class="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-bold"
-                            >
-                                {{
+                                >{{
                                     displayFlightNumber(
                                         outbound_flight.segments?.[0]
                                             ?.airline_code,
                                         outbound_flight.segments?.[0]
                                             ?.flight_number,
                                     )
-                                }}
-                            </span>
+                                }}</span
+                            >
                         </div>
-
                         <div class="mb-3 flex items-center justify-between">
                             <div class="text-left">
                                 <span
@@ -669,13 +660,12 @@ const proceedToCheckout = () => {
                                 >
                                 <span
                                     class="mb-1 block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
-                                >
-                                    {{
+                                    >{{
                                         getCityName(
                                             outbound_flight.origin_airport,
                                         )
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                                 <span class="text-xs text-muted-foreground">{{
                                     formatTime(outbound_flight.departure_at)
                                 }}</span>
@@ -715,13 +705,12 @@ const proceedToCheckout = () => {
                                 >
                                 <span
                                     class="mb-1 ml-auto block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
-                                >
-                                    {{
+                                    >{{
                                         getCityName(
                                             outbound_flight.destination_airport,
                                         )
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                                 <span class="text-xs text-muted-foreground">{{
                                     formatTime(outbound_flight.arrival_at)
                                 }}</span>
@@ -740,37 +729,35 @@ const proceedToCheckout = () => {
                             class="mb-3 flex items-start justify-between border-b border-border/50 pb-3"
                         >
                             <div class="flex flex-col">
-                                <span class="text-sm font-bold text-foreground">
-                                    {{
+                                <span
+                                    class="text-sm font-bold text-foreground"
+                                    >{{
                                         return_flight.segments?.[0]?.airlineData
                                             ?.name ||
                                         return_flight.segments?.[0]
                                             ?.airline_code
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                                 <span
                                     class="text-[10px] font-medium tracking-tight text-muted-foreground uppercase"
-                                >
-                                    {{
+                                    >{{
                                         return_flight.segments?.[0]?.aircraft
                                             ?.model_name || 'Aircraft TBA'
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                             </div>
                             <span
                                 class="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-bold"
-                            >
-                                {{
+                                >{{
                                     displayFlightNumber(
                                         return_flight.segments?.[0]
                                             ?.airline_code,
                                         return_flight.segments?.[0]
                                             ?.flight_number,
                                     )
-                                }}
-                            </span>
+                                }}</span
+                            >
                         </div>
-
                         <div class="mb-3 flex items-center justify-between">
                             <div class="text-left">
                                 <span
@@ -779,13 +766,12 @@ const proceedToCheckout = () => {
                                 >
                                 <span
                                     class="mb-1 block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
-                                >
-                                    {{
+                                    >{{
                                         getCityName(
                                             return_flight.origin_airport,
                                         )
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                                 <span class="text-xs text-muted-foreground">{{
                                     formatTime(return_flight.departure_at)
                                 }}</span>
@@ -825,13 +811,12 @@ const proceedToCheckout = () => {
                                 >
                                 <span
                                     class="mb-1 ml-auto block max-w-[80px] truncate text-[10px] font-bold tracking-wider text-muted-foreground uppercase"
-                                >
-                                    {{
+                                    >{{
                                         getCityName(
                                             return_flight.destination_airport,
                                         )
-                                    }}
-                                </span>
+                                    }}</span
+                                >
                                 <span class="text-xs text-muted-foreground">{{
                                     formatTime(return_flight.arrival_at)
                                 }}</span>
@@ -840,37 +825,231 @@ const proceedToCheckout = () => {
                     </div>
 
                     <div
-                        class="mb-6 flex flex-col gap-3 border-t border-border pt-5 text-sm"
+                        class="mb-6 flex flex-col gap-4 border-t border-border pt-5 text-sm"
                     >
                         <div
-                            v-if="totalSeatPrice > 0"
-                            class="flex items-center justify-between"
+                            v-if="insurances && insurances.length > 0"
+                            class="mb-2"
                         >
-                            <span class="text-muted-foreground"
-                                >Seat Selection Fees</span
-                            >
-                            <span class="font-semibold text-foreground">
-                                +
-                                {{
-                                    new Intl.NumberFormat('en-US', {
-                                        style: 'currency',
-                                        currency: 'USD',
-                                    }).format(totalSeatPrice)
-                                }}
-                            </span>
+                            <p class="mb-2 font-bold text-foreground">
+                                Travel Protection
+                            </p>
+                            <div class="space-y-2">
+                                <label
+                                    v-for="ins in insurances"
+                                    :key="ins.id"
+                                    class="flex cursor-pointer items-start gap-2 rounded-lg border border-border p-3 transition hover:bg-muted/30"
+                                    :class="{
+                                        'border-primary bg-primary/5':
+                                            selectedInsuranceId === ins.id,
+                                    }"
+                                >
+                                    <input
+                                        type="radio"
+                                        v-model="selectedInsuranceId"
+                                        :value="ins.id"
+                                        class="mt-1 h-4 w-4 text-primary focus:ring-primary"
+                                    />
+                                    <div class="flex-1">
+                                        <p class="font-bold text-foreground">
+                                            {{ ins.name }}
+                                        </p>
+                                        <p
+                                            class="text-xs text-muted-foreground"
+                                        >
+                                            {{ ins.description }}
+                                        </p>
+                                    </div>
+                                    <span class="font-bold text-foreground"
+                                        >+${{ ins.price_usd
+                                        }}<span
+                                            class="text-[10px] font-normal text-muted-foreground"
+                                            >/pax</span
+                                        ></span
+                                    >
+                                </label>
+                                <label
+                                    class="flex cursor-pointer items-center gap-2 rounded-lg border border-border p-3 transition hover:bg-muted/30"
+                                >
+                                    <input
+                                        type="radio"
+                                        v-model="selectedInsuranceId"
+                                        :value="null"
+                                        class="h-4 w-4 text-primary focus:ring-primary"
+                                    />
+                                    <span class="font-medium text-foreground"
+                                        >No, I'll risk it.</span
+                                    >
+                                </label>
+                            </div>
                         </div>
-                        <div class="mt-2 flex items-end justify-between">
-                            <span class="font-bold text-muted-foreground"
-                                >Final Total</span
+
+                        <div
+                            class="mb-2 rounded-lg border border-border bg-muted/10 p-3"
+                        >
+                            <p
+                                class="mb-2 text-xs font-bold tracking-wider text-muted-foreground uppercase"
                             >
-                            <span class="text-3xl font-black text-primary">
-                                {{
-                                    new Intl.NumberFormat('en-US', {
-                                        style: 'currency',
-                                        currency: 'USD',
-                                    }).format(totalPrice)
-                                }}
-                            </span>
+                                Promo Code
+                            </p>
+                            <div
+                                v-if="appliedPromo"
+                                class="flex items-center justify-between rounded bg-emerald-500/10 px-3 py-2"
+                            >
+                                <span
+                                    class="font-mono text-xs font-bold text-emerald-600"
+                                    >✓ {{ appliedPromo.code }} Applied</span
+                                >
+                                <button
+                                    @click="removePromo"
+                                    class="text-xs font-bold text-destructive hover:underline"
+                                >
+                                    Remove
+                                </button>
+                            </div>
+                            <div v-else class="flex gap-2">
+                                <input
+                                    type="text"
+                                    v-model="inputPromoCode"
+                                    placeholder="Enter code"
+                                    class="aero-input flex-1 rounded border border-border px-3 py-1.5 text-sm uppercase"
+                                />
+                                <Button
+                                    @click="applyPromo"
+                                    variant="secondary"
+                                    size="sm"
+                                    class="shrink-0"
+                                    >Apply</Button
+                                >
+                            </div>
+                            <p
+                                v-if="promoError"
+                                class="mt-1 text-xs text-destructive"
+                            >
+                                {{ promoError }}
+                            </p>
+                        </div>
+
+                        <div
+                            v-if="availablePoints > 0"
+                            class="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-4"
+                        >
+                            <div class="mb-2 flex items-center justify-between">
+                                <span
+                                    class="flex items-center gap-1.5 text-xs font-bold tracking-wider text-amber-700 uppercase"
+                                >
+                                    <svg
+                                        class="h-4 w-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        />
+                                    </svg>
+                                    AeroPoints
+                                </span>
+                                <span
+                                    class="text-xs font-semibold text-amber-600"
+                                    >{{ availablePoints }} Available</span
+                                >
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <input
+                                    type="number"
+                                    v-model="pointsToUse"
+                                    min="0"
+                                    :max="availablePoints"
+                                    class="aero-input w-full flex-1 rounded border border-amber-300 bg-white px-3 py-1.5 text-sm"
+                                    placeholder="0"
+                                />
+                                <span class="text-xs font-bold text-amber-700"
+                                    >Pts</span
+                                >
+                            </div>
+                            <p class="mt-1.5 text-[10px] text-amber-600/80">
+                                1 Pts = $1.00 Discount
+                            </p>
+                        </div>
+
+                        <div class="mt-2 border-t border-border pt-4">
+                            <div class="mb-2 flex justify-between">
+                                <span class="text-muted-foreground"
+                                    >Base Ticket(s)</span
+                                >
+                                <span class="font-medium">{{
+                                    formatCurrency(totalPriceObj.base)
+                                }}</span>
+                            </div>
+                            <div
+                                v-if="totalPriceObj.seats > 0"
+                                class="mb-2 flex justify-between"
+                            >
+                                <span class="text-muted-foreground"
+                                    >Seat Upgrades</span
+                                >
+                                <span class="font-medium"
+                                    >+
+                                    {{
+                                        formatCurrency(totalPriceObj.seats)
+                                    }}</span
+                                >
+                            </div>
+                            <div
+                                v-if="totalPriceObj.insurance > 0"
+                                class="mb-2 flex justify-between"
+                            >
+                                <span class="text-muted-foreground"
+                                    >Travel Protection</span
+                                >
+                                <span class="font-medium"
+                                    >+
+                                    {{
+                                        formatCurrency(totalPriceObj.insurance)
+                                    }}</span
+                                >
+                            </div>
+                            <div
+                                v-if="totalPriceObj.discount > 0"
+                                class="mb-2 flex justify-between text-emerald-600"
+                            >
+                                <span class="font-bold">Promo Discount</span>
+                                <span class="font-bold"
+                                    >-
+                                    {{
+                                        formatCurrency(totalPriceObj.discount)
+                                    }}</span
+                                >
+                            </div>
+                            <div
+                                v-if="pointsToUse > 0"
+                                class="mb-2 flex justify-between text-amber-600"
+                            >
+                                <span class="font-bold">Points Applied</span>
+                                <span class="font-bold"
+                                    >- {{ formatCurrency(pointsToUse) }}</span
+                                >
+                            </div>
+
+                            <div
+                                class="mt-4 flex items-end justify-between border-t border-border pt-3"
+                            >
+                                <span class="font-bold text-muted-foreground"
+                                    >Final Total</span
+                                >
+                                <span class="text-3xl font-black text-primary">
+                                    {{ formatCurrency(totalPriceObj.finalPay) }}
+                                </span>
+                            </div>
+                            <p
+                                class="mt-1 text-right text-[10px] font-bold text-amber-600"
+                            >
+                                Earn {{ totalPriceObj.pointsEarned }} AeroPoints
+                            </p>
                         </div>
                     </div>
 

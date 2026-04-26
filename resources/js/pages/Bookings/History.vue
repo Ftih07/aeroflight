@@ -32,6 +32,7 @@ onMounted(async () => {
         const res = await fetch(
             'https://gist.githubusercontent.com/tdreyno/4278655/raw/7b0762c09b519f40397e4c3e100b097d861f5588/airports.json',
         );
+
         if (res.ok) {
             const data = await res.json();
             allAirports.value = data.filter(
@@ -44,8 +45,12 @@ onMounted(async () => {
 });
 
 const getCityName = (code: string) => {
-    if (!allAirports.value.length) return '';
+    if (!allAirports.value.length) {
+        return '';
+    }
+
     const airport = allAirports.value.find((a: any) => a.code === code);
+
     return airport ? airport.name : '';
 };
 
@@ -56,19 +61,29 @@ const filteredBookings = computed(() => {
             if (
                 statusFilter.value === 'awaiting_payment' &&
                 booking.status !== 'draft'
-            )
+            ) {
                 return false;
-            if (statusFilter.value === 'upcoming' && booking.status !== 'paid')
+            }
+
+            if (
+                statusFilter.value === 'upcoming' &&
+                booking.status !== 'paid'
+            ) {
                 return false;
-            if (statusFilter.value === 'flown' && booking.status !== 'used')
+            }
+
+            if (statusFilter.value === 'flown' && booking.status !== 'used') {
                 return false;
+            }
+
             if (
                 statusFilter.value === 'cancelled' &&
                 !['refunded', 'cancelled', 'refund_requested'].includes(
                     booking.status,
                 )
-            )
+            ) {
                 return false;
+            }
         }
 
         if (searchQuery.value) {
@@ -83,7 +98,6 @@ const filteredBookings = computed(() => {
                 .toLowerCase()
                 .includes(q);
 
-            // 👇 UPDATE LOGIKA SEARCH AIRLINE
             const mainAirlineName =
                 booking.flight.segments?.[0]?.airlineData?.name || '';
             const mainAirlineCode =
@@ -103,6 +117,7 @@ const filteredBookings = computed(() => {
 
 const paginatedBookings = computed(() => {
     const start = (currentPage.value - 1) * itemsPerPage;
+
     return filteredBookings.value.slice(start, start + itemsPerPage);
 });
 
@@ -112,7 +127,10 @@ const totalPages = computed(() =>
 
 // --- 3. FORMATTERS ---
 const formatDate = (dateString: string) => {
-    if (!dateString) return '-';
+    if (!dateString) {
+        return '-';
+    }
+
     return new Date(dateString).toLocaleDateString('en-US', {
         day: 'numeric',
         month: 'short',
@@ -121,7 +139,10 @@ const formatDate = (dateString: string) => {
 };
 
 const formatTime = (dateString: string) => {
-    if (!dateString) return '--:--';
+    if (!dateString) {
+        return '--:--';
+    }
+
     return new Date(dateString).toLocaleTimeString('en-US', {
         hour: '2-digit',
         minute: '2-digit',
@@ -129,7 +150,10 @@ const formatTime = (dateString: string) => {
 };
 
 const formatDateTime = (dateString: string) => {
-    if (!dateString) return '-';
+    if (!dateString) {
+        return '-';
+    }
+
     return new Date(dateString).toLocaleString('en-US', {
         day: 'numeric',
         month: 'short',
@@ -140,10 +164,14 @@ const formatDateTime = (dateString: string) => {
 };
 
 const calculateDuration = (departure: string, arrival: string) => {
-    if (!departure || !arrival) return '-';
+    if (!departure || !arrival) {
+        return '-';
+    }
+
     const diffMs = new Date(arrival).getTime() - new Date(departure).getTime();
     const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
     const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
     return diffHrs === 0 ? `${diffMins}m` : `${diffHrs}h ${diffMins}m`;
 };
 
@@ -156,13 +184,17 @@ const formatCurrency = (value: number) => {
 
 // --- HELPER SEATS ---
 const formatSeats = (seatsJson: any) => {
-    if (!seatsJson) return 'TBA';
-    // Menghandle data yang mungkin masih string JSON dari database
+    if (!seatsJson) {
+        return 'TBA';
+    }
+
     const parsedSeats =
         typeof seatsJson === 'string' ? JSON.parse(seatsJson) : seatsJson;
+
     if (typeof parsedSeats === 'object' && parsedSeats !== null) {
         return Object.values(parsedSeats).join(', ');
     }
+
     return 'TBA';
 };
 
@@ -188,7 +220,7 @@ const confirmRefund = () => {
 };
 
 const openSummaryModal = (booking: any) => {
-    activeBooking.value = booking;
+    activeBooking.value = JSON.parse(JSON.stringify(booking));
     showSummaryModal.value = true;
 };
 const closeSummaryModal = () => {
@@ -524,13 +556,9 @@ const closeSummaryModal = () => {
                                 <p class="text-xl font-black text-primary">
                                     {{
                                         formatCurrency(
-                                            Number(booking.total_amount_usd) +
-                                                (booking.return_booking
-                                                    ? Number(
-                                                          booking.return_booking
-                                                              .total_amount_usd,
-                                                      )
-                                                    : 0),
+                                            Number(
+                                                booking.final_amount_usd || 0,
+                                            ),
                                         )
                                     }}
                                 </p>
@@ -571,13 +599,85 @@ const closeSummaryModal = () => {
                                 >
                             </a>
 
-                            <Button
-                                v-if="booking.status === 'paid'"
-                                variant="outline"
-                                class="w-full border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                @click="openRefundModal(booking.id)"
-                                >Request Refund</Button
+                            <div
+                                v-if="
+                                    [
+                                        'paid',
+                                        'pending',
+                                        'awaiting_payment',
+                                    ].includes(booking.status)
+                                "
+                                class="mt-4 mb-2 flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 p-2.5 text-xs"
                             >
+                                <div
+                                    class="flex items-start justify-between gap-4"
+                                >
+                                    <span
+                                        class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground"
+                                    >
+                                        <svg
+                                            v-if="booking.flight?.is_refundable"
+                                            class="h-3.5 w-3.5 text-emerald-500"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M5 13l4 4L19 7"
+                                            />
+                                        </svg>
+                                        <svg
+                                            v-else
+                                            class="h-3.5 w-3.5 text-destructive"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                        Refundable
+                                    </span>
+                                    <span
+                                        v-if="booking.flight?.is_refundable"
+                                        class="text-right leading-tight font-semibold text-foreground"
+                                    >
+                                        Yes, subject to airline cancellation
+                                        policy and timing.
+                                    </span>
+                                    <span
+                                        v-else
+                                        class="text-right font-bold text-destructive"
+                                    >
+                                        No (Strict Policy)
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div v-if="booking.status === 'paid'">
+                                <Button
+                                    v-if="booking.flight?.is_refundable"
+                                    variant="outline"
+                                    class="w-full border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                    @click="openRefundModal(booking.id)"
+                                    >Request Refund</Button
+                                >
+                                <Button
+                                    v-else
+                                    variant="outline"
+                                    disabled
+                                    class="w-full cursor-not-allowed opacity-50"
+                                    title="This flight is non-refundable"
+                                    >Non-Refundable</Button
+                                >
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1268,27 +1368,125 @@ const closeSummaryModal = () => {
                     </div>
 
                     <div
-                        class="-mx-6 mb-6 flex items-center justify-between border-t-2 border-dashed border-border bg-muted/20 px-6 pt-4 pb-2"
+                        class="mb-6 flex flex-col gap-3 border-t border-border pt-5 text-sm"
                     >
-                        <span
-                            class="text-sm font-bold text-muted-foreground uppercase"
-                            >Total Payment</span
+                        <div class="flex items-center justify-between">
+                            <span class="text-muted-foreground"
+                                >Base Flight Ticket(s) & Seats</span
+                            >
+                            <span class="font-medium text-foreground">
+                                {{
+                                    formatCurrency(
+                                        Number(activeBooking.total_amount_usd) +
+                                            (activeBooking.return_booking
+                                                ? Number(
+                                                      activeBooking
+                                                          .return_booking
+                                                          .total_amount_usd,
+                                                  )
+                                                : 0),
+                                    )
+                                }}
+                            </span>
+                        </div>
+
+                        <div
+                            v-if="Number(activeBooking.insurance_fee_usd) > 0"
+                            class="flex items-center justify-between"
                         >
-                        <span class="text-3xl font-black text-primary">
-                            {{
-                                formatCurrency(
-                                    Number(activeBooking.total_amount_usd) +
-                                        (activeBooking.return_booking
-                                            ? Number(
-                                                  activeBooking.return_booking
-                                                      .total_amount_usd,
-                                              )
-                                            : 0),
-                                )
-                            }}
-                        </span>
+                            <span class="text-muted-foreground"
+                                >Travel Protection Insurance</span
+                            >
+                            <span class="font-medium text-foreground"
+                                >+
+                                {{
+                                    formatCurrency(
+                                        Number(activeBooking.insurance_fee_usd),
+                                    )
+                                }}</span
+                            >
+                        </div>
+
+                        <div
+                            v-if="Number(activeBooking.discount_amount_usd) > 0"
+                            class="flex items-center justify-between text-emerald-600"
+                        >
+                            <span class="font-bold">
+                                Promo Discount
+                                <span v-if="activeBooking.promo?.code"
+                                    >({{ activeBooking.promo.code }})</span
+                                >
+                            </span>
+                            <span class="font-bold"
+                                >-
+                                {{
+                                    formatCurrency(
+                                        Number(
+                                            activeBooking.discount_amount_usd,
+                                        ),
+                                    )
+                                }}</span
+                            >
+                        </div>
+
+                        <div
+                            v-if="Number(activeBooking.points_used) > 0"
+                            class="flex items-center justify-between text-amber-600"
+                        >
+                            <span class="font-bold">AeroPoints Applied</span>
+                            <span class="font-bold"
+                                >-
+                                {{
+                                    formatCurrency(
+                                        Number(activeBooking.points_used),
+                                    )
+                                }}</span
+                            >
+                        </div>
                     </div>
 
+                    <div
+                        class="-mx-6 mb-6 flex flex-col gap-1 border-t-2 border-dashed border-border bg-muted/20 px-6 pt-4 pb-3"
+                    >
+                        <div class="flex items-center justify-between">
+                            <span
+                                class="text-sm font-bold text-muted-foreground uppercase"
+                                >Total Payment</span
+                            >
+                            <span class="text-3xl font-black text-primary">
+                                {{
+                                    formatCurrency(
+                                        Number(
+                                            activeBooking?.final_amount_usd ||
+                                                0,
+                                        ),
+                                    )
+                                }}
+                            </span>
+                        </div>
+                        <div
+                            v-if="
+                                Number(activeBooking.points_earned) > 0 &&
+                                activeBooking.status === 'paid'
+                            "
+                            class="mt-1 flex justify-end text-[10px] font-bold text-amber-600"
+                        >
+                            <svg
+                                class="mr-1 h-3.5 w-3.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            Earned {{ activeBooking.points_earned }} AeroPoints
+                        </div>
+                    </div>
                     <div v-if="['paid', 'used'].includes(activeBooking.status)">
                         <a :href="`/bookings/${activeBooking.id}/ticket`">
                             <Button
